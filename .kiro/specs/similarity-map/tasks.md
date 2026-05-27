@@ -6,15 +6,15 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
 
 ## Tasks
 
-- [ ] 1. Project scaffolding and core types
-  - [ ] 1.1 Initialize Tauri 2 project with Rust backend and Vanilla JS frontend
+- [x] 1. Project scaffolding and core types
+  - [x] 1.1 Initialize Tauri 2 project with Rust backend and Vanilla JS frontend
     - Create Tauri 2 app with `cargo-tauri` scaffolding
     - Configure `Cargo.toml` with dependencies: `tauri`, `serde`, `serde_json`, `uuid`, `sha2`, `tokio`, `lancedb`, `ort`, `proptest` (dev)
     - Set up frontend directory with `index.html`, `main.js`, `style.css`
     - Configure Tauri permissions for file system access and event emission
     - _Requirements: All (foundational)_
 
-  - [ ] 1.2 Define core Rust types and enums
+  - [x] 1.2 Define core Rust types and enums
     - Implement `Page`, `PaginationMode`, `Window`, `PageSubGrid`, `SubCell`, `SubCellCluster`
     - Implement `ClusterRegistry`, `ClusterInfo`, `PageCanvas`, `DisplayState`
     - Implement IPC response types: `DocumentSessionState`, `CompleteJobInfo`, `PartialJobInfo`
@@ -23,15 +23,15 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Derive `Serialize`/`Deserialize` for all IPC-facing types
     - _Requirements: All (foundational types)_
 
-  - [ ] 1.3 Define Tauri command stubs and event constants
+  - [x] 1.3 Define Tauri command stubs and event constants
     - Register all 12 Tauri commands as async stubs returning `todo!()`
     - Define event name constants: `similarity-map:progress`, `similarity-map:page-ready`, `similarity-map:model-download-progress`, `similarity-map:model-ready`
     - Wire command registration in `main.rs`
     - _Requirements: All (IPC surface)_
 
 
-- [ ] 2. LanceDB storage layer
-  - [ ] 2.1 Implement LanceDB schema and connection management
+- [x] 2. LanceDB storage layer
+  - [x] 2.1 Implement LanceDB schema and connection management
     - Create `storage` module with LanceDB connection pool
     - Define `windows` table schema (window_id, job_id, window_index, page, char_start, char_end, doc_char_start, text, embedding, cluster_id, hdbscan_label, sim_to_centroid, sub_cell_row, sub_cell_col)
     - Define `pages` table schema (job_id, page, doc_char_start, doc_char_end, char_count, token_count, pagination_mode)
@@ -39,7 +39,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Implement table creation and migration logic
     - _Requirements: 26.1, 26.2, 26.3_
 
-  - [ ] 2.2 Implement storage CRUD operations
+  - [x] 2.2 Implement storage CRUD operations
     - Implement `insert_job`, `update_job_status`, `get_jobs_for_document`
     - Implement `batch_insert_windows`, `get_windows_for_job`, `get_window_count`
     - Implement `insert_pages`, `get_pages_for_job`
@@ -47,7 +47,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Implement `get_embeddings_for_job` (vector retrieval for clustering)
     - _Requirements: 26.1, 20.3, 21.4, 22.5_
 
-  - [ ] 2.3 Implement hash utilities for settings and document content
+  - [x] 2.3 Implement hash utilities for settings and document content
     - Implement `compute_document_hash(path) -> SHA-256` reading file contents
     - Implement `compute_settings_hash(window_size, stride, tokens_per_page, min_repetitions, min_samples) -> SHA-256` with deterministic serialization
     - _Requirements: 26.2, 26.3, 21.5_
@@ -60,8 +60,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify identical file content always produces the same document_hash
     - **Validates: Requirements 26.2, 26.3, 21.5**
 
-- [ ] 3. Importer / Paginator
-  - [ ] 3.1 Implement plain-text token-count pagination
+- [x] 3. Importer / Paginator
+  - [x] 3.1 Implement plain-text token-count pagination
     - Implement whitespace tokenization and page splitting at `tokens_per_page` boundary
     - Track character-accurate `doc_char_start` and `doc_char_end` for each page
     - Handle final short page without padding
@@ -74,7 +74,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify concatenating all page spans reproduces original document exactly
     - **Validates: Requirements 2.1, 2.2, 2.3**
 
-  - [ ] 3.3 Implement chapter break pagination
+  - [x] 3.3 Implement chapter break pagination
     - Implement regex-based chapter boundary detection
     - Apply tokens_per_page as maximum cap, splitting oversized chapters
     - Include matching line as first content of new page
@@ -89,7 +89,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - **Validates: Requirements 3.1, 3.2**
 
 
-  - [ ] 3.5 Implement PDF import
+  - [x] 3.5 Implement PDF import
     - Integrate `pdf-extract` crate for text extraction per PDF page
     - Create one Page per PDF page preserving natural boundaries
     - Handle corrupt/unreadable PDFs with error message
@@ -97,8 +97,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Enforce 300-page maximum with warning
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [ ] 4. Text Window Engine
-  - [ ] 4.1 Implement sliding window generation
+- [x] 4. Text Window Engine
+  - [x] 4.1 Implement sliding window generation
     - Implement overlapping window generation with configurable window_size and stride
     - Record page-relative char_start and char_end for each window
     - Prevent windows from crossing page boundaries
@@ -116,7 +116,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify: (d) window_index forms contiguous sequence from 0
     - **Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.6**
 
-  - [ ] 4.3 Implement window count estimation
+  - [x] 4.3 Implement window count estimation
     - Implement `estimate_window_count(total_tokens, window_size, stride) -> u32`
     - Formula: `floor((total_tokens - window_size) / stride) + 1`
     - Handle edge case where total_tokens <= window_size
@@ -130,11 +130,11 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify window count estimate matches formula
     - **Validates: Requirements 6.2, 6.3**
 
-- [ ] 5. Checkpoint — Ensure all tests pass
+- [x] 5. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 6. Embedding Engine
-  - [ ] 6.1 Implement ONNX model management
+- [x] 6. Embedding Engine
+  - [x] 6.1 Implement ONNX model management
     - Integrate `ort` crate for ONNX Runtime
     - Implement `ensure_embedding_model` command: verify model presence and SHA-256 hash
     - Implement model download from Hugging Face with progress events
@@ -143,7 +143,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Handle download failure with retry mechanism
     - _Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 5.2, 5.3_
 
-  - [ ] 6.2 Implement batch embedding pipeline
+  - [x] 6.2 Implement batch embedding pipeline
     - Load all-MiniLM-L6-v2 ONNX model via `ort`
     - Process windows in batches of 32
     - Truncate inputs exceeding 256 tokens before inference
@@ -167,7 +167,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - **Validates: Requirements 5.4**
 
 
-  - [ ] 6.5 Implement benchmark probe and time estimation
+  - [x] 6.5 Implement benchmark probe and time estimation
     - Embed fixed 128-window probe on first launch
     - Record throughput (windows/sec) in app data
     - Implement `estimate_analysis` command using benchmark rate × window count
@@ -175,8 +175,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Cache benchmark result, update when model changes
     - _Requirements: 6.1, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 7. HDBSCAN Clustering
-  - [ ] 7.1 Implement HDBSCAN clustering
+- [x] 7. HDBSCAN Clustering
+  - [x] 7.1 Implement HDBSCAN clustering
     - Integrate HDBSCAN Rust implementation (or Python FFI)
     - Accept min_repetitions (2–20) and min_samples (1–10) parameters
     - Derive min_cluster_size: `min_reps × max(1, floor(phrase_length / stride))`
@@ -191,8 +191,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify derived value = min_repetitions × max(1, floor(phrase_length / stride))
     - **Validates: Requirements 7.3**
 
-- [ ] 8. KMeans Stabilization
-  - [ ] 8.1 Implement KMeans stabilizer
+- [x] 8. KMeans Stabilization
+  - [x] 8.1 Implement KMeans stabilizer
     - Run KMeans on non-noise windows with k = number of HDBSCAN clusters with ≥3 members
     - Use fixed random seed and process in window_index order
     - Assign one stable integer ID per cluster without merging
@@ -208,8 +208,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4**
 
 
-- [ ] 9. Centroid Computation
-  - [ ] 9.1 Implement centroid computation and cluster registry
+- [x] 9. Centroid Computation
+  - [x] 9.1 Implement centroid computation and cluster registry
     - Compute element-wise mean of member embeddings per cluster
     - Identify most_central_window_id (highest cosine sim to centroid, ties broken by lowest window_index)
     - Build cluster-to-pages index (sorted page numbers)
@@ -225,8 +225,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify cluster-to-pages = sorted set of member page numbers
     - **Validates: Requirements 9.1, 9.2, 9.4**
 
-- [ ] 10. Sub-Cell Mapper
-  - [ ] 10.1 Implement sub-cell position mapping
+- [x] 10. Sub-Cell Mapper
+  - [x] 10.1 Implement sub-cell position mapping
     - Compute midpoint = floor((char_start + char_end) / 2)
     - Compute linear_index = clamp(floor(midpoint / page_char_count × 400), 0, 399)
     - Derive row = linear_index / 20, col = linear_index % 20
@@ -242,12 +242,12 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify cluster list sorted desc by sim_to_centroid, capped at 8
     - **Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5**
 
-- [ ] 11. Checkpoint — Ensure all tests pass
+- [x] 11. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 
-- [ ] 12. HSV Color Mapper
-  - [ ] 12.1 Implement HSV color encoding
+- [x] 12. HSV Color Mapper
+  - [x] 12.1 Implement HSV color encoding
     - Implement golden-ratio hue assignment: `(cluster_id × 0.6180339887) mod 1.0`
     - Fix saturation at 1.0 for all clustered windows
     - Compute value: `max(0.0, sim_to_centroid) ^ gamma`
@@ -263,8 +263,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify alpha = 1.0 for valid clusters, alpha = 0 for noise/empty
     - **Validates: Requirements 11.1, 11.2, 11.3, 11.4, 11.5, 11.6**
 
-- [ ] 13. Canvas Rasterizer
-  - [ ] 13.1 Implement similarity-weighted color blending
+- [x] 13. Canvas Rasterizer
+  - [x] 13.1 Implement similarity-weighted color blending
     - Implement `blend_sub_cell` function for single and multi-cluster sub-cells
     - Apply weights as `sim_to_centroid ^ gamma`, normalize to sum 1.0
     - Blend in linear RGB space, convert result to sRGB
@@ -281,7 +281,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify output is exactly 1600 bytes
     - **Validates: Requirements 12.1, 12.2, 12.3, 13.1, 13.3**
 
-  - [ ] 13.3 Implement page canvas rasterization loop
+  - [x] 13.3 Implement page canvas rasterization loop
     - Implement `rasterize_page` iterating 20×20 grid
     - Apply threshold, gamma, and hidden_clusters filtering
     - Produce 1600-byte RGBA array (row-major)
@@ -289,14 +289,14 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - _Requirements: 13.1, 13.2, 13.3, 13.4_
 
 
-  - [ ] 13.4 Implement `raster_pages` command for targeted re-rasterization
+  - [x] 13.4 Implement `raster_pages` command for targeted re-rasterization
     - Accept job_id, page list, threshold, gamma, hidden_clusters
     - Re-raster only specified pages from stored sub-grid data
     - Return Vec<PageCanvas> for affected pages
     - _Requirements: 17.2, 17.3, 18.2, 29.2, 29.3_
 
-- [ ] 14. Pipeline orchestration and analyze_document command
-  - [ ] 14.1 Implement full pipeline orchestration
+- [x] 14. Pipeline orchestration and analyze_document command
+  - [x] 14.1 Implement full pipeline orchestration
     - Wire stages: Import → Window → Embed → HDBSCAN → KMeans → Centroid → SubCell → Color → Raster
     - Implement `analyze_document` command invoking full pipeline
     - Emit progress events at each stage transition and after each embedding batch
@@ -304,7 +304,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Compute rolling ETA from sliding window of last 50 batch durations
     - _Requirements: 19.1, 19.2, 19.3, 19.4, 30.1_
 
-  - [ ] 14.2 Implement cancellation support
+  - [x] 14.2 Implement cancellation support
     - Implement `cancel_analysis` command stopping at next batch boundary
     - Commit all completed batches before stopping
     - Set job status to "partial" (≥1 batch) or "discarded" (0 batches)
@@ -319,7 +319,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify windows_committed count is accurate
     - **Validates: Requirements 20.3, 20.4**
 
-  - [ ] 14.4 Implement resume support
+  - [x] 14.4 Implement resume support
     - Implement `resume_analysis` command
     - Skip windows with window_index < windows_committed
     - Continue embedding from windows_committed onward
@@ -336,29 +336,29 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify progress = (current - M) / (N - M)
     - **Validates: Requirements 21.2, 21.6**
 
-- [ ] 15. Checkpoint — Ensure all tests pass
+- [x] 15. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 16. Session management commands
-  - [ ] 16.1 Implement check_document_session command
+- [x] 16. Session management commands
+  - [x] 16.1 Implement check_document_session command
     - Query jobs table for complete and partial jobs matching document path
     - Return DocumentSessionState with complete_job and partial_job info
     - Check document_hash for edit detection
     - _Requirements: 22.1, 22.2, 26.4, 26.5_
 
-  - [ ] 16.2 Implement restore_session command
+  - [x] 16.2 Implement restore_session command
     - Load embeddings and cluster data from LanceDB
     - Re-run rasterization pipeline (SubCell → Color → Raster)
     - Stream page-ready events as pages complete
     - Emit progress events with stage "rasterizing"
     - _Requirements: 22.3, 22.4, 26.4_
 
-  - [ ] 16.3 Implement discard_job command
+  - [x] 16.3 Implement discard_job command
     - Delete windows, pages, and job record from LanceDB
     - Delete associated display state JSON file
     - _Requirements: 22.5, 23.4_
 
-  - [ ] 16.4 Implement display state persistence
+  - [x] 16.4 Implement display state persistence
     - Write DisplayState to sidecar JSON at `$APPDATA/similarity-map/sessions/<job_id>.json`
     - Implement debounced write (2-second delay after changes)
     - Write on application window close
@@ -373,8 +373,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - **Validates: Requirements 22.4, 23.1, 22.6**
 
 
-- [ ] 17. Frontend — Grid Renderer
-  - [ ] 17.1 Implement grid layout and page cell rendering
+- [x] 17. Frontend — Grid Renderer
+  - [x] 17.1 Implement grid layout and page cell rendering
     - Create 10-column CSS grid layout with configurable gap (0–4px, default 1px)
     - Render each page cell as 20×20 canvas using ImageBitmap
     - Apply `image-rendering: pixelated` at base scale
@@ -383,7 +383,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Display unprocessed positions as transparent cells
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 30.2, 30.3_
 
-  - [ ] 17.2 Implement tolerance alpha mask (frontend-only)
+  - [x] 17.2 Implement tolerance alpha mask (frontend-only)
     - Implement per-page 1-bit alpha mask (400 pixels per page)
     - Set pixel alpha = 1 if highest sim_to_centroid in sub-cell > tolerance, else 0
     - Update mask on slider drag with no backend IPC
@@ -397,13 +397,13 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Verify no backend IPC required
     - **Validates: Requirements 16.2, 16.3**
 
-  - [ ] 17.4 Implement zoom and CSS scaling
+  - [x] 17.4 Implement zoom and CSS scaling
     - Scale grid via CSS transforms (no re-computation on resize)
     - Maintain one ImageBitmap per page (no allocation on zoom/scroll)
     - Release previous ImageBitmap before creating replacement on re-raster
     - _Requirements: 28.1, 28.2, 28.3, 28.4, 29.4_
 
-  - [ ] 17.5 Implement spatial dithering at zoom
+  - [x] 17.5 Implement spatial dithering at zoom
     - Apply dithering patterns when cell ≥ 100×200px
     - 2 clusters: checkerboard `(px_row + px_col) mod 2`
     - 3 clusters: thirds scatter `(px_row * 3 + px_col * 7) mod 3`
@@ -413,8 +413,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - _Requirements: 12.4, 12.5_
 
 
-- [ ] 18. Frontend — Import Settings Panel
-  - [ ] 18.1 Implement import settings UI controls
+- [x] 18. Frontend — Import Settings Panel
+  - [x] 18.1 Implement import settings UI controls
     - Create sliders: Tokens per Page (200–2000), Phrase Length (5–1500), Stride (1–200), Min Repetitions (2–20), Min Samples (1–10)
     - Create Chapter Break regex text field with default `^Chapter\s+\d+`
     - Auto-compute default Stride as `max(1, floor(phrase_length × 0.25))` on Phrase Length change
@@ -424,7 +424,7 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Disable Tokens per Page for PDF imports
     - _Requirements: 15.1, 15.2, 15.3, 15.6, 2.4, 6.4, 1.3_
 
-  - [ ] 18.2 Implement progress view and cancellation UI
+  - [x] 18.2 Implement progress view and cancellation UI
     - Transition to progress view on Analyze click
     - Lock all controls during analysis
     - Display multi-stage checklist (Paginating, Windowing, Embedding, Clustering, Rasterizing)
@@ -434,8 +434,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Show resume banner for partial jobs with percentage and storage used
     - _Requirements: 15.4, 15.5, 19.3, 20.1, 20.6, 21.1_
 
-- [ ] 19. Frontend — Display Settings
-  - [ ] 19.1 Implement display settings controls
+- [x] 19. Frontend — Display Settings
+  - [x] 19.1 Implement display settings controls
     - Tolerance slider (0.75–1.00, step 0.01, default 0.88)
     - Gamma slider (0.5–3.0, step 0.1, default 1.5)
     - Cluster filter toggles (one per cluster, all enabled by default)
@@ -453,17 +453,17 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - **Validates: Requirements 17.2, 17.3, 17.4, 29.2**
 
 
-- [ ] 20. Checkpoint — Ensure all tests pass
+- [x] 20. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 21. Frontend — Detail Panel and Tooltips
-  - [ ] 21.1 Implement tooltip manager
+- [x] 21. Frontend — Detail Panel and Tooltips
+  - [x] 21.1 Implement tooltip manager
     - Macro-cell tooltips at base zoom: page number, top 3 clusters, max similarity
     - Sub-cell tooltips at ≥ 5×5 px per sub-cell: position %, cluster name, sim score, excerpt (120 chars)
     - No tooltip for sub-cells/macro-cells with no clusters above Tolerance
     - _Requirements: 24.1, 24.2, 24.3, 24.4_
 
-  - [ ] 21.2 Implement detail panel
+  - [x] 21.2 Implement detail panel
     - Side panel listing windows above Tolerance, grouped by cluster
     - Show window text excerpt, cluster hue indicator, similarity score, counterpart page links
     - Implement `get_page_detail` command for sub-cell click data
@@ -471,27 +471,27 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - No action for clicks on empty/below-threshold sub-cells
     - _Requirements: 25.1, 25.2, 25.4, 25.5_
 
-  - [ ] 21.3 Implement counterpart navigation
+  - [x] 21.3 Implement counterpart navigation
     - Scroll grid to target page on counterpart link click
     - Apply 1.5-second pulse animation to target macro-cell
     - Render visible outline on corresponding sub-cell until next click
     - _Requirements: 25.3_
 
-- [ ] 22. Frontend — Session dialog and model download UI
-  - [ ] 22.1 Implement session restore dialog
+- [x] 22. Frontend — Session dialog and model download UI
+  - [x] 22.1 Implement session restore dialog
     - Show dialog on document open when complete session found
     - Display job creation date, page count, phrase length, stride
     - Offer "Restore Session" and "Generate New Map" actions
     - Treat Escape/click-outside as "Generate New Map"
     - _Requirements: 22.1, 22.2, 22.3, 22.5, 22.7_
 
-  - [ ] 22.2 Implement model download progress UI
+  - [x] 22.2 Implement model download progress UI
     - Show download progress bar with percentage and bytes
     - Display error with Retry button on download failure
     - Block analysis until model available
     - _Requirements: 27.2, 27.4, 5.5_
 
-- [ ] 23. Final checkpoint — Ensure all tests pass
+- [x] 23. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 

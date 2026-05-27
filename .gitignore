@@ -21,3 +21,15 @@ target
 #.idea/
 .DS_Store
 **/.DS_Store
+
+# Node (if dev server is used)
+node_modules/
+dist/
+
+# Tauri
+src-tauri/target/
+WixTools/
+*.msi
+*.dmg
+*.AppImage
+*.deb
