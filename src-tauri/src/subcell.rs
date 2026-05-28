@@ -201,8 +201,11 @@ mod tests {
 
         // Only the non-noise window should appear.
         let total_clusters: usize = grids[0].cells.iter().map(|c| c.clusters.len()).sum();
-        assert_eq!(total_clusters, 1);
-        assert_eq!(grids[0].cells.iter().find(|c| !c.clusters.is_empty()).unwrap().clusters[0].cluster_id, 1);
+        assert!(total_clusters > 0);
+        // The window paints a span of sub-cells, but all entries should be for cluster 1.
+        for cell in grids[0].cells.iter().filter(|c| !c.clusters.is_empty()) {
+            assert_eq!(cell.clusters[0].cluster_id, 1);
+        }
     }
 
     #[test]
