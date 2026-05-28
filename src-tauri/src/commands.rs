@@ -756,9 +756,104 @@ pub async fn get_page_detail(
 
 /// Returns the cluster registry for a completed job.
 #[tauri::command]
-pub async fn get_cluster_registry(job_id: String) -> Result<ClusterRegistry, AppError> {
-    let _ = job_id;
-    todo!()
+pub async fn get_cluster_registry(
+    app_handle: tauri::AppHandle,
+    job_id: String,
+) -> Result<ClusterRegistry, AppError> {
+    use crate::centroid::{build_cluster_registry, WindowData};
+    use crate::storage::Storage;
+
+    use arrow_array::{Array, FixedSizeListArray, Float32Array, Int32Array, StringArray, UInt32Array};
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+
+    let window_batches = store.get_windows_for_job(&job_id).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to load windows: {}", e),
+        })
+    })?;
+
+    let mut window_data_list: Vec<WindowData> = Vec::new();
+
+    for batch in &window_batches {
+        if batch.num_rows() == 0 {
+            continue;
+        }
+
+        let window_ids = batch
+            .column_by_name("window_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let window_indices = batch
+            .column_by_name("window_index")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let pages_col = batch
+            .column_by_name("page")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let texts = batch
+            .column_by_name("text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let cluster_ids = batch
+            .column_by_name("cluster_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        let embeddings_col = batch
+            .column_by_name("embedding")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeListArray>()
+            .unwrap();
+
+        for i in 0..batch.num_rows() {
+            let embedding = embeddings_col
+                .value(i)
+                .as_any()
+                .downcast_ref::<Float32Array>()
+                .unwrap()
+                .values()
+                .to_vec();
+
+            window_data_list.push(WindowData {
+                window_id: window_ids.value(i).to_string(),
+                window_index: window_indices.value(i),
+                page: pages_col.value(i),
+                cluster_id: cluster_ids.value(i),
+                embedding,
+                text: texts.value(i).to_string(),
+            });
+        }
+    }
+
+    Ok(build_cluster_registry(&window_data_list))
 }
 
 /// Persists display state (tolerance, gamma, hidden clusters, zoom, scroll).

@@ -88,6 +88,7 @@ pub fn encode_canvas_base64(canvas: &PageCanvas) -> String {
 mod tests {
     use super::*;
     use crate::types::SubCellCluster;
+    use crate::color::EMPTY_BG_RGBA;
 
     /// Helper: create an empty 20×20 grid for a given page.
     fn empty_grid(page: u32) -> PageSubGrid {
@@ -112,11 +113,11 @@ mod tests {
         let grid = empty_grid(1);
         let canvas = rasterize_page(&grid, 1.5, 0.75, &HashSet::new());
 
-        // Every pixel should be transparent [0, 0, 0, 0]
+        // Every pixel should be the background color (no matches).
         assert_eq!(canvas.page, 1);
         assert_eq!(canvas.pixels.len(), PageCanvas::PIXEL_BYTE_LEN);
         for chunk in canvas.pixels.chunks(4) {
-            assert_eq!(chunk, &[0, 0, 0, 0], "expected transparent pixel");
+            assert_eq!(chunk, &EMPTY_BG_RGBA, "expected background pixel");
         }
     }
 
@@ -140,7 +141,7 @@ mod tests {
 
         // Verify a neighboring empty cell is transparent
         let empty_offset = (3 * 20 + 8) * 4;
-        assert_eq!(canvas.pixels[empty_offset..empty_offset + 4], [0, 0, 0, 0]);
+        assert_eq!(&canvas.pixels[empty_offset..empty_offset + 4], &EMPTY_BG_RGBA);
     }
 
     #[test]
@@ -174,8 +175,8 @@ mod tests {
         let grid = grid_with_cluster_at(1, 0, 0, 5, 0.95);
         let canvas = rasterize_page(&grid, 1.5, 0.75, &hidden);
 
-        // Cluster 5 is hidden, so pixel should be transparent
-        assert_eq!(&canvas.pixels[0..4], &[0, 0, 0, 0]);
+        // Cluster 5 is hidden, so pixel should be background
+        assert_eq!(&canvas.pixels[0..4], &EMPTY_BG_RGBA);
     }
 
     #[test]
@@ -185,7 +186,7 @@ mod tests {
         let canvas = rasterize_page(&grid, 1.5, 0.75, &HashSet::new());
 
         let offset = (5 * 20 + 5) * 4;
-        assert_eq!(&canvas.pixels[offset..offset + 4], &[0, 0, 0, 0]);
+        assert_eq!(&canvas.pixels[offset..offset + 4], &EMPTY_BG_RGBA);
     }
 
     // --- rasterize_pages tests ---
@@ -214,7 +215,7 @@ mod tests {
 
         // Page 3: all transparent
         for chunk in canvases[2].pixels.chunks(4) {
-            assert_eq!(chunk, &[0, 0, 0, 0]);
+            assert_eq!(chunk, &EMPTY_BG_RGBA);
         }
     }
 
@@ -329,7 +330,7 @@ mod tests {
 
         assert_eq!(canvases.len(), 2);
         // Page 1 has cluster 5 which is hidden → transparent
-        assert_eq!(&canvases[0].pixels[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&canvases[0].pixels[0..4], &EMPTY_BG_RGBA);
         // Page 2 has cluster 6 which is not hidden → non-transparent
         assert_eq!(canvases[1].pixels[3], 255);
     }
@@ -345,7 +346,7 @@ mod tests {
 
         assert_eq!(canvases.len(), 2);
         // Page 1: sim 0.70 < threshold 0.75 → transparent
-        assert_eq!(&canvases[0].pixels[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&canvases[0].pixels[0..4], &EMPTY_BG_RGBA);
         // Page 2: sim 0.90 >= threshold 0.75 → non-transparent
         assert_eq!(canvases[1].pixels[3], 255);
     }

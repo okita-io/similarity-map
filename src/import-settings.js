@@ -536,6 +536,11 @@ export class ImportSettingsPanel {
     }
 
     try {
+      // Clear the active job filter while the backend is streaming `page-ready` events
+      // for a new analysis run (we don't know the new job_id yet).
+      // Otherwise, a previous job_id can cause the grid to ignore the new run's events.
+      window.currentJobId = "";
+
       const result = await invoke("analyze_document", {
         path: this.filePath,
         windowSize: settings.phraseLength,
@@ -594,6 +599,15 @@ export class ImportSettingsPanel {
       await invoke("restore_session", { jobId });
     } catch (err) {
       console.error("restore_session failed:", err);
+    }
+
+    try {
+      const registry = await invoke("get_cluster_registry", { jobId });
+      if (display && registry?.clusters) {
+        display.setClusters(Object.values(registry.clusters));
+      }
+    } catch (err) {
+      console.warn("get_cluster_registry failed:", err);
     }
   }
 

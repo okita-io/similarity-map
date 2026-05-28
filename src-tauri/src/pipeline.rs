@@ -22,7 +22,7 @@ use crate::importer;
 use crate::model;
 use crate::rasterizer::{encode_canvas_base64, rasterize_page};
 use crate::storage::{InsertJobParams, PageRecord, Storage, WindowRecord};
-use crate::subcell::{build_page_sub_grids, WindowSubCellData};
+use crate::subcell::{build_page_sub_grids, compute_sub_cell, WindowSubCellData};
 use crate::types::*;
 use crate::windowing::generate_windows;
 
@@ -122,6 +122,66 @@ fn emit_stage_progress(
             "eta_seconds": eta_seconds,
         }),
     );
+}
+
+/// How many window rows to write per LanceDB batch when persisting cluster results.
+const PERSIST_WINDOWS_CHUNK: usize = 256;
+
+/// Replace stored windows with final cluster assignments so `restore_session` can re-rasterize.
+async fn persist_clustered_windows(
+    store: &Storage,
+    job_id: &str,
+    windows: &[Window],
+    all_embeddings: &[Vec<f32>],
+    hdbscan_labels: &[i32],
+    stable_labels: &[i32],
+    sim_to_centroids: &[f32],
+    page_char_counts: &HashMap<u32, u32>,
+) -> Result<(), AppError> {
+    let records: Vec<WindowRecord> = windows
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let (sub_cell_row, sub_cell_col) = page_char_counts
+                .get(&w.page)
+                .map(|&cc| compute_sub_cell(w.char_start, w.char_end, cc))
+                .unwrap_or((0, 0));
+
+            WindowRecord {
+                window_id: w.window_id.clone(),
+                job_id: job_id.to_string(),
+                window_index: w.window_index,
+                page: w.page,
+                char_start: w.char_start,
+                char_end: w.char_end,
+                doc_char_start: w.doc_char_start,
+                text: w.text.clone(),
+                embedding: all_embeddings[i].clone(),
+                cluster_id: stable_labels[i],
+                hdbscan_label: hdbscan_labels[i],
+                sim_to_centroid: sim_to_centroids[i],
+                sub_cell_row,
+                sub_cell_col,
+            }
+        })
+        .collect();
+
+    store
+        .delete_windows_for_job(job_id)
+        .await
+        .map_err(|e| AppError::Storage(StorageError {
+            message: format!("Failed to clear windows before persisting clusters: {}", e),
+        }))?;
+
+    for chunk in records.chunks(PERSIST_WINDOWS_CHUNK) {
+        store.batch_insert_windows(chunk).await.map_err(|e| {
+            AppError::Storage(StorageError {
+                message: format!("Failed to persist clustered windows: {}", e),
+            })
+        })?;
+    }
+
+    Ok(())
 }
 
 /// Emit a page-ready event with the rasterized canvas.
@@ -586,6 +646,18 @@ pub async fn run_pipeline(
         })
         .collect();
 
+    persist_clustered_windows(
+        &store,
+        &job_id,
+        &windows,
+        &all_embeddings,
+        &hdbscan_labels,
+        &stable_labels,
+        &sim_to_centroids,
+        &page_char_counts,
+    )
+    .await?;
+
     let page_sub_grids = build_page_sub_grids(&subcell_data, &page_char_counts);
 
     // ─── Stage 10: Rasterize Pages ───────────────────────────────────────────
@@ -599,7 +671,9 @@ pub async fn run_pipeline(
         0.0,
     );
 
-    let default_threshold = 0.88_f32;
+    // Default threshold tuned for MiniLM embeddings: 0.88 can be too strict and
+    // produce all-transparent pages on smaller/less-repetitive documents.
+    let default_threshold = 0.75_f32;
     let default_gamma = 1.5_f32;
     let hidden: HashSet<i32> = HashSet::new();
 
@@ -994,6 +1068,18 @@ pub async fn resume_pipeline(
         })
         .collect();
 
+    persist_clustered_windows(
+        &store,
+        &job_id,
+        &windows,
+        &all_embeddings,
+        &hdbscan_labels,
+        &stable_labels,
+        &sim_to_centroids,
+        &page_char_counts,
+    )
+    .await?;
+
     let page_sub_grids = build_page_sub_grids(&subcell_data, &page_char_counts);
 
     // Rasterization
@@ -1007,7 +1093,8 @@ pub async fn resume_pipeline(
         0.0,
     );
 
-    let default_threshold = 0.88_f32;
+    // Keep resume behavior consistent with fresh runs.
+    let default_threshold = 0.75_f32;
     let default_gamma = 1.5_f32;
     let hidden: HashSet<i32> = HashSet::new();
 

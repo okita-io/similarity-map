@@ -387,6 +387,14 @@ impl Storage {
         Ok(())
     }
 
+    /// Delete all window rows for a job (pages and job record are untouched).
+    pub async fn delete_windows_for_job(&self, job_id: &str) -> Result<(), StorageError> {
+        let table = self.open_table(TABLE_WINDOWS).await?;
+        let filter = format!("job_id = '{}'", job_id);
+        table.delete(&filter).await?;
+        Ok(())
+    }
+
     /// Get all windows for a given job_id.
     pub async fn get_windows_for_job(
         &self,

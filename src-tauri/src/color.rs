@@ -8,6 +8,10 @@ use std::collections::HashSet;
 
 use crate::types::SubCellCluster;
 
+/// Default background pixel for "no match" sub-cells.
+/// This ensures pages visibly "exist" after processing even when nothing clears the threshold.
+pub const EMPTY_BG_RGBA: [u8; 4] = [34, 34, 42, 255];
+
 /// Golden-ratio hue assignment for a cluster.
 /// Returns a value in [0, 1).
 pub fn cluster_hue(cluster_id: i32) -> f32 {
@@ -91,8 +95,7 @@ pub fn linear_to_srgb_rgba(r: f32, g: f32, b: f32, a: f32) -> [u8; 4] {
 /// caps at 8 visible clusters (already sorted by sim_to_centroid desc in SubCell),
 /// computes similarity-weighted linear RGB blend, and converts to sRGB RGBA.
 ///
-/// Returns `[0, 0, 0, 0]` (transparent) for empty, all-below-threshold,
-/// or all-hidden sub-cells.
+/// Returns a dark background color for empty, all-below-threshold, or all-hidden sub-cells.
 pub fn blend_sub_cell(
     clusters: &[SubCellCluster],
     gamma: f32,
@@ -106,7 +109,7 @@ pub fn blend_sub_cell(
         .collect();
 
     if visible.is_empty() {
-        return [0, 0, 0, 0];
+        return EMPTY_BG_RGBA;
     }
 
     let mut r = 0.0f32;
@@ -124,7 +127,7 @@ pub fn blend_sub_cell(
     }
 
     if total_weight == 0.0 {
-        return [0, 0, 0, 0];
+        return EMPTY_BG_RGBA;
     }
 
     linear_to_srgb_rgba(r / total_weight, g / total_weight, b / total_weight, 1.0)
@@ -452,21 +455,21 @@ mod tests {
     }
 
     #[test]
-    fn test_blend_empty_clusters_transparent() {
+    fn test_blend_empty_clusters_returns_background() {
         let clusters: Vec<SubCellCluster> = vec![];
         let result = blend_sub_cell(&clusters, 1.5, 0.75, &HashSet::new());
-        assert_eq!(result, [0, 0, 0, 0]);
+        assert_eq!(result, EMPTY_BG_RGBA);
     }
 
     #[test]
-    fn test_blend_below_threshold_transparent() {
-        // All clusters below threshold → transparent
+    fn test_blend_below_threshold_returns_background() {
+        // All clusters below threshold → background
         let clusters = vec![
             make_cluster(1, 0.70),
             make_cluster(2, 0.60),
         ];
         let result = blend_sub_cell(&clusters, 1.5, 0.75, &HashSet::new());
-        assert_eq!(result, [0, 0, 0, 0]);
+        assert_eq!(result, EMPTY_BG_RGBA);
     }
 
     #[test]
@@ -490,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn test_blend_all_hidden_transparent() {
+    fn test_blend_all_hidden_returns_background() {
         let clusters = vec![
             make_cluster(1, 0.95),
             make_cluster(2, 0.90),
@@ -500,15 +503,15 @@ mod tests {
         hidden.insert(2);
 
         let result = blend_sub_cell(&clusters, 1.5, 0.75, &hidden);
-        assert_eq!(result, [0, 0, 0, 0]);
+        assert_eq!(result, EMPTY_BG_RGBA);
     }
 
     #[test]
-    fn test_blend_zero_total_weight_transparent() {
+    fn test_blend_zero_total_weight_returns_background() {
         // sim_to_centroid = 0.0 passes threshold of 0.0 but weight = 0^gamma = 0
         let clusters = vec![make_cluster(1, 0.0)];
         let result = blend_sub_cell(&clusters, 1.5, 0.0, &HashSet::new());
-        assert_eq!(result, [0, 0, 0, 0]);
+        assert_eq!(result, EMPTY_BG_RGBA);
     }
 
     #[test]

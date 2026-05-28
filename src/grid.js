@@ -5,6 +5,7 @@ const CELL_SIZE = 20; // pixels per page cell (native resolution)
 const COLUMNS = 10;
 const MAX_PAGES = 300;
 const SMOOTH_THRESHOLD = 100; // px on longest dimension to switch rendering mode
+const DEFAULT_BG = "rgb(34, 34, 42)"; // visible baseline for processed/empty pages
 
 /**
  * GridRenderer manages the page grid container, creating canvas elements
@@ -16,8 +17,6 @@ export class GridRenderer {
    */
   constructor(container) {
     this._container = container;
-    /** @type {Map<number, ImageBitmap>} page (1-based) → current ImageBitmap */
-    this._bitmaps = new Map();
     /** @type {Map<number, HTMLCanvasElement>} page (1-based) → canvas element */
     this._canvases = new Map();
     this._pageCount = 0;
@@ -31,12 +30,12 @@ export class GridRenderer {
   initGrid(pageCount) {
     this._pageCount = pageCount;
     // Clear any existing content
-    this._releaseAllBitmaps();
     this._container.innerHTML = "";
     this._canvases.clear();
 
     // Cap at MAX_PAGES (300) per requirement 14.6
     const displayCount = Math.min(pageCount, MAX_PAGES);
+    console.info(`[grid] initGrid pageCount=${pageCount} displayCount=${displayCount}`);
 
     for (let i = 1; i <= displayCount; i++) {
       const canvas = document.createElement("canvas");
@@ -44,6 +43,11 @@ export class GridRenderer {
       canvas.height = CELL_SIZE;
       canvas.dataset.page = String(i);
       canvas.setAttribute("aria-label", `Page ${i}`);
+      // Fill with a baseline background so "processed but empty" is visible even
+      // if no page-ready events are received (or pixels are fully masked out).
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = DEFAULT_BG;
+      ctx.fillRect(0, 0, CELL_SIZE, CELL_SIZE);
       this._container.appendChild(canvas);
       this._canvases.set(i, canvas);
     }
@@ -68,33 +72,40 @@ export class GridRenderer {
     const canvas = this._canvases.get(page);
     if (!canvas) return;
 
-    // Decode base64 → Uint8Array
-    const binary = atob(canvasRgbaB64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+    try {
+      // Decode base64 → Uint8Array
+      const binary = atob(canvasRgbaB64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      // Create ImageData from the raw RGBA bytes
+      const imageData = new ImageData(
+        new Uint8ClampedArray(bytes.buffer),
+        CELL_SIZE,
+        CELL_SIZE
+      );
+
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
+
+      // Prefer ImageBitmap when supported, otherwise putImageData.
+      try {
+        if (typeof createImageBitmap === "function") {
+          const bitmap = await createImageBitmap(imageData);
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close?.();
+          return;
+        }
+      } catch (e) {
+        console.warn("createImageBitmap failed; falling back to putImageData", e);
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+    } catch (err) {
+      console.error("[grid] updatePage failed", { page, err });
     }
-
-    // Create ImageData from the raw RGBA bytes
-    const imageData = new ImageData(
-      new Uint8ClampedArray(bytes.buffer),
-      CELL_SIZE,
-      CELL_SIZE
-    );
-
-    // Create ImageBitmap (release previous one first)
-    const oldBitmap = this._bitmaps.get(page);
-    if (oldBitmap) {
-      oldBitmap.close();
-    }
-
-    const bitmap = await createImageBitmap(imageData);
-    this._bitmaps.set(page, bitmap);
-
-    // Draw to canvas
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
-    ctx.drawImage(bitmap, 0, 0);
   }
 
   /**
@@ -142,9 +153,11 @@ export class GridRenderer {
       const activeJob = window.currentJobId;
       if (activeJob && job_id && job_id !== activeJob) return;
 
+      console.info(`[grid] page-ready job_id=${job_id} page=${page}`);
+
       // Draw within the next animation frame for smooth progressive fill
       requestAnimationFrame(() => {
-        this.updatePage(page, canvas_rgba_b64);
+        void this.updatePage(page, canvas_rgba_b64);
       });
     });
   }
@@ -160,21 +173,10 @@ export class GridRenderer {
   }
 
   /**
-   * Release all stored ImageBitmaps to free memory.
-   */
-  _releaseAllBitmaps() {
-    for (const bitmap of this._bitmaps.values()) {
-      bitmap.close();
-    }
-    this._bitmaps.clear();
-  }
-
-  /**
    * Clean up resources.
    */
   destroy() {
     this.stopListening();
-    this._releaseAllBitmaps();
     this._container.innerHTML = "";
     this._canvases.clear();
   }

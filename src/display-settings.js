@@ -42,7 +42,8 @@ export class DisplaySettingsPanel {
     this.onPagesUpdated = options.onPagesUpdated || null;
 
     // Current display state
-    this._tolerance = 0.88;
+    // Match backend default raster threshold for first-run visibility.
+    this._tolerance = 0.75;
     this._gamma = 1.5;
     /** @type {Set<number>} */
     this._hiddenClusters = new Set();
