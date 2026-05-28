@@ -140,7 +140,8 @@ export class ProgressView {
    * @param {ProgressPayload} payload
    */
   _handleProgress(payload) {
-    if (payload.job_id && payload.job_id !== this.jobId) return;
+    // Ignore only when we already know our job and the event is for a different one.
+    if (this.jobId && payload.job_id && payload.job_id !== this.jobId) return;
 
     this._currentStage = payload.stage;
     this._pct = payload.pct;

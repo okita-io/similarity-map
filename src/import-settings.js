@@ -29,6 +29,9 @@ export class ImportSettingsPanel {
     // Debounce timer for estimate updates
     this._estimateTimer = null;
 
+    /** @type {AnalysisEstimate|null} */
+    this._lastEstimate = null;
+
     // Progress view reference (active during analysis)
     this._progressView = null;
 
@@ -341,8 +344,8 @@ export class ImportSettingsPanel {
         // Import SessionDialog dynamically to avoid circular deps
         const { SessionDialog } = await import("./session-dialog.js");
         const dialog = new SessionDialog({
-          onRestore: (jobId) => {
-            window.currentJobId = jobId;
+          onRestore: (jobId, pageCount) => {
+            this._activateJob(jobId, pageCount);
           },
           onGenerateNew: () => {
             // User chose to generate new — settings panel is already showing
@@ -407,6 +410,7 @@ export class ImportSettingsPanel {
   /** Call estimate_analysis via Tauri IPC and update display */
   async _updateEstimate() {
     if (!this.filePath) {
+      this._lastEstimate = null;
       this._els.estimateWindowCount.textContent = "—";
       this._els.estimateTime.textContent = "—";
       this._els.estimateNudge.hidden = true;
@@ -434,6 +438,7 @@ export class ImportSettingsPanel {
         tokensPerPage: tokensPerPage,
       });
 
+      this._lastEstimate = estimate;
       this._els.estimateWindowCount.textContent = estimate.window_count.toLocaleString();
 
       if (estimate.benchmark_windows_per_sec > 0) {
@@ -501,6 +506,26 @@ export class ImportSettingsPanel {
     }
 
     // Transition to progress view. Wrap in try/catch so a render error doesn't blank the panel.
+    let pageCount = this._lastEstimate?.page_count ?? 0;
+    if (!pageCount) {
+      try {
+        const estimate = await invoke("estimate_analysis", {
+          path: this.filePath,
+          windowSize: settings.phraseLength,
+          stride: settings.stride,
+          tokensPerPage: this.isPdf ? null : settings.tokensPerPage,
+        });
+        this._lastEstimate = estimate;
+        pageCount = estimate.page_count;
+      } catch (estErr) {
+        console.warn("estimate_analysis before analyze failed:", estErr);
+      }
+    }
+
+    if (pageCount > 0 && window.gridRenderer) {
+      window.gridRenderer.initGrid(pageCount);
+    }
+
     try {
       this._showProgressView("");
     } catch (renderErr) {
@@ -521,16 +546,63 @@ export class ImportSettingsPanel {
         minSamples: settings.minSamples,
       });
 
-      if (this._progressView && result && result.job_id) {
-        this._progressView.setJobId(result.job_id);
-        window.currentJobId = result.job_id;
-      }
       console.info(`analyze_document returned: ${JSON.stringify(result)}`);
+
+      if (result?.job_id) {
+        if (this._progressView) {
+          this._progressView.setJobId(result.job_id);
+        }
+        await this._onAnalysisComplete(result);
+      }
     } catch (err) {
       console.error("analyze_document failed:", err);
       await this._restoreSettingsView();
       this._showAnalysisError(err);
     }
+  }
+
+  /**
+   * Wire up the grid and display panels after a job finishes or is restored.
+   * Re-streams page-ready events from storage so the grid fills even if events
+   * were missed during the blocking analyze_document call.
+   * @param {string} jobId
+   * @param {number} pageCount
+   */
+  async _activateJob(jobId, pageCount) {
+    window.currentJobId = jobId;
+
+    const grid = window.gridRenderer;
+    if (grid && pageCount > 0) {
+      grid.initGrid(pageCount);
+    }
+
+    const display = window.displaySettingsPanel;
+    if (display) {
+      display.setJobId(jobId);
+      display.setAllPages(
+        Array.from({ length: pageCount }, (_, i) => i + 1),
+      );
+      if (grid) {
+        display.setCanvases(grid._canvases);
+      }
+    }
+
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) return;
+
+    try {
+      await invoke("restore_session", { jobId });
+    } catch (err) {
+      console.error("restore_session failed:", err);
+    }
+  }
+
+  /**
+   * @param {{ job_id: string, page_count: number, window_count: number }} result
+   */
+  async _onAnalysisComplete(result) {
+    await this._activateJob(result.job_id, result.page_count);
+    await this._restoreSettingsView();
   }
 
   /**

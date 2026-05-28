@@ -147,13 +147,9 @@ export class SessionDialog {
     this.dismiss();
 
     try {
-      const invoke = window.__TAURI__?.core?.invoke;
-      if (invoke) {
-        await invoke("restore_session", { jobId: job.job_id });
-      }
-      this._onRestore(job.job_id);
+      await this._onRestore(job.job_id, job.page_count);
     } catch (err) {
-      console.error("restore_session failed:", err);
+      console.error("restore session failed:", err);
       // Fall back to generate new on failure
       this._onGenerateNew();
     }

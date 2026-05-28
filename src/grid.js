@@ -138,7 +138,10 @@ export class GridRenderer {
     }
 
     this._unlisten = await tauriEvent.listen("similarity-map:page-ready", (event) => {
-      const { page, canvas_rgba_b64 } = event.payload;
+      const { page, canvas_rgba_b64, job_id } = event.payload;
+      const activeJob = window.currentJobId;
+      if (activeJob && job_id && job_id !== activeJob) return;
+
       // Draw within the next animation frame for smooth progressive fill
       requestAnimationFrame(() => {
         this.updatePage(page, canvas_rgba_b64);
