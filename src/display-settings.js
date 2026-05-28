@@ -162,6 +162,36 @@ export class DisplaySettingsPanel {
     this._renderClusterToggles();
   }
 
+  /**
+   * Short label for the cluster list using the centroid (most central) window text.
+   * @param {ClusterInfo} cluster
+   * @returns {string}
+   */
+  _clusterListLabel(cluster) {
+    const text = (cluster.most_central_window_text || "").trim();
+    if (!text) {
+      return `Cluster ${cluster.cluster_id}`;
+    }
+    const maxLen = 72;
+    if (text.length <= maxLen) {
+      return text;
+    }
+    return `${text.slice(0, maxLen - 1)}…`;
+  }
+
+  /**
+   * Full tooltip text for a cluster row.
+   * @param {ClusterInfo} cluster
+   * @returns {string}
+   */
+  _clusterListTitle(cluster) {
+    const text = (cluster.most_central_window_text || "").trim();
+    if (!text) {
+      return `Cluster ${cluster.cluster_id} (${cluster.member_count} windows)`;
+    }
+    return `Cluster ${cluster.cluster_id} (${cluster.member_count} windows)\n${text}`;
+  }
+
   /** Render cluster toggle checkboxes */
   _renderClusterToggles() {
     const list = this._els.clusterFilterList;
@@ -172,30 +202,47 @@ export class DisplaySettingsPanel {
       return;
     }
 
-    for (const cluster of this._clusters) {
+    const sorted = [...this._clusters].sort(
+      (a, b) => a.cluster_id - b.cluster_id,
+    );
+
+    for (const cluster of sorted) {
       const isVisible = !this._hiddenClusters.has(cluster.cluster_id);
       const hueColor = this._hueToCSS(cluster.hue);
+      const title = this._clusterListTitle(cluster);
 
       const toggle = document.createElement("label");
       toggle.className = "cluster-toggle";
-      toggle.innerHTML = `
-        <input
-          type="checkbox"
-          class="cluster-checkbox"
-          data-cluster-id="${cluster.cluster_id}"
-          ${isVisible ? "checked" : ""}
-          aria-label="Toggle cluster ${cluster.cluster_id}"
-        />
-        <span class="cluster-swatch" style="background-color: ${hueColor};"></span>
-        <span class="cluster-toggle-label">Cluster ${cluster.cluster_id}</span>
-        <span class="cluster-toggle-count">(${cluster.member_count})</span>
-      `;
+      toggle.title = title;
 
-      const checkbox = toggle.querySelector("input");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "cluster-checkbox";
+      checkbox.dataset.clusterId = String(cluster.cluster_id);
+      checkbox.checked = isVisible;
+      checkbox.setAttribute(
+        "aria-label",
+        `Toggle cluster ${cluster.cluster_id}`,
+      );
+
+      const swatch = document.createElement("span");
+      swatch.className = "cluster-swatch";
+      swatch.style.backgroundColor = hueColor;
+      swatch.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.className = "cluster-toggle-label";
+      label.textContent = this._clusterListLabel(cluster);
+
+      const count = document.createElement("span");
+      count.className = "cluster-toggle-count";
+      count.textContent = `(${cluster.member_count})`;
+
       checkbox.addEventListener("change", () => {
         this._onClusterToggle(cluster.cluster_id, checkbox.checked);
       });
 
+      toggle.append(checkbox, swatch, label, count);
       list.appendChild(toggle);
     }
   }
