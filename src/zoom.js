@@ -33,6 +33,11 @@ export class ZoomController {
     return this._zoom;
   }
 
+  /** @returns {number} Current zoom level (same as `.zoom`). */
+  getZoom() {
+    return this._zoom;
+  }
+
   /**
    * Set the zoom level. Clamped to [MIN_ZOOM, MAX_ZOOM].
    * Only updates CSS transform — no bitmap allocation.

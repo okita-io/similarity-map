@@ -424,6 +424,11 @@ export class DisplaySettingsPanel {
     return this._tolerance;
   }
 
+  /** @returns {number} Current tolerance (same as `.tolerance`). */
+  getTolerance() {
+    return this._tolerance;
+  }
+
   /** Get current gamma value */
   get gamma() {
     return this._gamma;
