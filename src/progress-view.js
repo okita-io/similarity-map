@@ -24,12 +24,16 @@
  * @property {number|null} tokens_per_page
  */
 
+// Stage ids must match pipeline.rs Stage::as_str() values.
 const STAGES = [
-  { id: "paginating", label: "Paginating" },
+  { id: "import", label: "Importing" },
   { id: "windowing", label: "Windowing" },
   { id: "embedding", label: "Embedding" },
   { id: "clustering", label: "Clustering" },
-  { id: "rasterizing", label: "Rasterizing" },
+  { id: "stabilization", label: "Stabilizing" },
+  { id: "centroid", label: "Centroids" },
+  { id: "subcell", label: "Sub-cells" },
+  { id: "rasterization", label: "Rasterizing" },
 ];
 
 export class ProgressView {
@@ -56,6 +60,7 @@ export class ProgressView {
 
     this._buildUI();
     this._attachListeners();
+    this._updateStageDisplay();
     this._startListening();
   }
 
@@ -148,7 +153,11 @@ export class ProgressView {
 
   /** Update the stage checklist UI based on current progress */
   _updateStageDisplay() {
-    const currentIndex = STAGES.findIndex((s) => s.id === this._currentStage);
+    let currentIndex = STAGES.findIndex((s) => s.id === this._currentStage);
+    // Before the first progress event, show the checklist with Importing as active.
+    if (currentIndex < 0) {
+      currentIndex = 0;
+    }
 
     for (let i = 0; i < STAGES.length; i++) {
       const stage = STAGES[i];
@@ -224,7 +233,7 @@ export class ProgressView {
     try {
       const invoke = window.__TAURI__?.core?.invoke;
       if (invoke) {
-        await invoke("cancel_analysis", { job_id: this.jobId });
+        await invoke("cancel_analysis", { jobId: this.jobId });
       }
     } catch (err) {
       console.error("cancel_analysis failed:", err);
@@ -266,12 +275,14 @@ export class ProgressView {
     this.jobId = jobId;
   }
 
-  /** Clean up event listeners */
-  async destroy() {
+  /** Clean up event listeners. Pass clearDom=false when the container will be rebuilt immediately. */
+  async destroy(clearDom = true) {
     if (this._unlisten) {
       await this._unlisten();
       this._unlisten = null;
     }
-    this.container.innerHTML = "";
+    if (clearDom) {
+      this.container.innerHTML = "";
+    }
   }
 }

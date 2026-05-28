@@ -149,7 +149,7 @@ export class SessionDialog {
     try {
       const invoke = window.__TAURI__?.core?.invoke;
       if (invoke) {
-        await invoke("restore_session", { job_id: job.job_id });
+        await invoke("restore_session", { jobId: job.job_id });
       }
       this._onRestore(job.job_id);
     } catch (err) {
@@ -167,7 +167,7 @@ export class SessionDialog {
     try {
       const invoke = window.__TAURI__?.core?.invoke;
       if (invoke && job && job.job_id) {
-        await invoke("discard_job", { job_id: job.job_id });
+        await invoke("discard_job", { jobId: job.job_id });
       }
     } catch (err) {
       console.warn("discard_job failed:", err);

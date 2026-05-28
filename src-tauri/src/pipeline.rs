@@ -148,15 +148,44 @@ pub async fn run_pipeline(
 ) -> Result<AnalysisHandle, AppError> {
     let job_id = Uuid::new_v4().to_string();
 
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "run_pipeline start: job_id={} path={} window_size={} stride={} tokens_per_page={:?} min_reps={} min_samples={}",
+        job_id,
+        config.path,
+        config.window_size,
+        config.stride,
+        config.tokens_per_page,
+        config.min_repetitions,
+        config.min_samples
+    );
+
     // ─── Stage 1: Validate Parameters ────────────────────────────────────────
-    validate_params(&config)?;
+    if let Err(e) = validate_params(&config) {
+        crate::log_error!(app_handle, "pipeline", "validate_params failed: {:?}", e);
+        return Err(e);
+    }
 
     // ─── Stage 2: Import / Paginate ──────────────────────────────────────────
     emit_stage_progress(&app_handle, &job_id, Stage::Import, 0.0, 0, 0, 0.0);
 
     let file_path = Path::new(&config.path);
-    let pages = import_document(file_path, &config)?;
+    let pages = match import_document(file_path, &config) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::log_error!(app_handle, "pipeline", "import_document failed: {:?}", e);
+            return Err(e);
+        }
+    };
     let page_count = pages.len() as u32;
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "imported {} pages from {}",
+        page_count,
+        config.path
+    );
 
     let pagination_mode = if pages.is_empty() {
         "token".to_string()
@@ -169,8 +198,17 @@ pub async fn run_pipeline(
 
     let windows = generate_windows(&pages, config.window_size, config.stride);
     let window_count = windows.len() as u32;
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "generated {} windows (size={} stride={})",
+        window_count,
+        config.window_size,
+        config.stride
+    );
 
     if window_count == 0 {
+        crate::log_error!(app_handle, "pipeline", "no windows generated; aborting");
         return Err(AppError::Import(ImportError {
             message: "Document produced no analyzable windows".to_string(),
             path: Some(config.path.clone()),
@@ -272,10 +310,38 @@ pub async fn run_pipeline(
     );
 
     let model_path = model::model_path(&app_data_dir);
-    let mut engine = EmbeddingEngine::new(&model_path)?;
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "loading ONNX model from {}",
+        model_path.display()
+    );
+    let mut engine = match EmbeddingEngine::new(&model_path) {
+        Ok(e) => {
+            crate::log_info!(app_handle, "pipeline", "ONNX session loaded");
+            e
+        }
+        Err(e) => {
+            crate::log_error!(
+                app_handle,
+                "pipeline",
+                "EmbeddingEngine::new failed: {:?}",
+                e
+            );
+            return Err(e);
+        }
+    };
 
     let batch_size = DEFAULT_BATCH_SIZE;
     let total_batches = (windows.len() + batch_size - 1) / batch_size;
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "embedding {} windows in {} batches of {}",
+        windows.len(),
+        total_batches,
+        batch_size
+    );
     let mut eta_estimator = EtaEstimator::new(50);
     let mut windows_done: u32 = 0;
 

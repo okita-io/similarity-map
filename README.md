@@ -96,16 +96,39 @@ Run twice at different phrase lengths (e.g. 20 and 200 tokens) to see both fine-
 
 ### Development
 
-```bash
-# Clone the repo
-git clone https://github.com/your-org/similarity-map.git
-cd similarity-map
+There are two ways to run the app while developing. The frontend is plain static files in `src/` — no bundler, `npm install`, or separate dev server required. Tauri serves `src/` directly via `frontendDist`.
 
-# Run in development mode (hot-reload frontend, Rust rebuilds on change)
+**A. `cargo tauri dev`** — rebuilds Rust on change and reloads the webview (restart the app to pick up JS/CSS edits):
+
+```bash
+cd similarity-map
 cargo tauri dev
 ```
 
-The frontend is plain static files in `src/` — no bundler or `npm install` required.
+**B. `cargo run`** — same static frontend, fastest if you are only changing Rust:
+
+```bash
+cd similarity-map/src-tauri
+cargo run
+```
+
+To hot-reload frontend files without restarting Tauri, run a static server in another terminal and point the webview at it (optional):
+
+```bash
+python3 -m http.server 1420 --directory src
+```
+
+Then temporarily add `"devUrl": "http://localhost:1420"` to `src-tauri/tauri.conf.json` (and remove it again for normal dev).
+
+### In-app debug log
+
+There's a collapsible log drawer pinned to the bottom of the app window. It captures:
+
+- All `console.log/info/warn/error` calls from frontend JS
+- Unhandled errors and promise rejections
+- `similarity-map:log` events emitted from the Rust backend (model load, pipeline stages, IPC commands, errors)
+
+Use the **Level** dropdown to filter, **Copy** to paste a session into a bug report, and **Clear** to reset. From the JS console you can also call `window.logPanel.expand()` and `window.logPanel.log('info', 'me', 'hello')`.
 
 ### Running tests
 

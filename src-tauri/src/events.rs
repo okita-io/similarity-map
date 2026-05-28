@@ -13,3 +13,42 @@ pub const MODEL_DOWNLOAD_PROGRESS: &str = "similarity-map:model-download-progres
 /// Event emitted when the embedding model download is complete and ready.
 /// Payload: { path }
 pub const MODEL_READY: &str = "similarity-map:model-ready";
+
+/// Diagnostic log line emitted to the frontend log panel.
+/// Payload: { level: "debug" | "info" | "warn" | "error", source: String, message: String }
+pub const LOG: &str = "similarity-map:log";
+
+/// Emit a log line to the frontend log panel.
+///
+/// Safe to call from any thread; failures are intentionally swallowed so logging
+/// never breaks the calling code path.
+pub fn emit_log(app_handle: &tauri::AppHandle, level: &str, source: &str, message: impl Into<String>) {
+    use tauri::Emitter;
+    let payload = serde_json::json!({
+        "level": level,
+        "source": source,
+        "message": message.into(),
+    });
+    let _ = app_handle.emit(LOG, payload);
+}
+
+#[macro_export]
+macro_rules! log_info {
+    ($app:expr, $source:expr, $($arg:tt)*) => {
+        $crate::events::emit_log(&$app, "info", $source, format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_warn {
+    ($app:expr, $source:expr, $($arg:tt)*) => {
+        $crate::events::emit_log(&$app, "warn", $source, format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_error {
+    ($app:expr, $source:expr, $($arg:tt)*) => {
+        $crate::events::emit_log(&$app, "error", $source, format!($($arg)*))
+    };
+}

@@ -429,9 +429,9 @@ export class ImportSettingsPanel {
       /** @type {AnalysisEstimate} */
       const estimate = await invoke("estimate_analysis", {
         path: this.filePath,
-        window_size: windowSize,
+        windowSize: windowSize,
         stride: stride,
-        tokens_per_page: tokensPerPage,
+        tokensPerPage: tokensPerPage,
       });
 
       this._els.estimateWindowCount.textContent = estimate.window_count.toLocaleString();
@@ -482,41 +482,54 @@ export class ImportSettingsPanel {
     if (!this._validateChapterBreak()) return;
     if (!this.filePath) {
       console.warn("No file path set for analysis");
+      this._showAnalysisError("No document selected. Click Open Document first.");
       return;
     }
 
     const settings = this.getSettings();
-
-    // Save settings snapshot for restore on cancellation
     this._savedSettings = { ...settings };
 
+    console.info(
+      `Analyze clicked: path=${this.filePath} settings=${JSON.stringify(settings)}`,
+    );
+
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      console.warn("Tauri runtime not available");
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    // Transition to progress view. Wrap in try/catch so a render error doesn't blank the panel.
     try {
-      const invoke = window.__TAURI__?.core?.invoke;
-      if (!invoke) {
-        console.warn("Tauri runtime not available");
-        return;
-      }
-
-      // Transition to progress view
       this._showProgressView("");
+    } catch (renderErr) {
+      console.error("Failed to render progress view:", renderErr);
+      this._restoreSettingsView().catch(() => {});
+      this._showAnalysisError(renderErr);
+      return;
+    }
 
+    try {
       const result = await invoke("analyze_document", {
         path: this.filePath,
-        window_size: settings.phraseLength,
+        windowSize: settings.phraseLength,
         stride: settings.stride,
-        tokens_per_page: this.isPdf ? null : settings.tokensPerPage,
-        chapter_break_regex: settings.chapterBreak || null,
-        min_repetitions: settings.minRepetitions,
-        min_samples: settings.minSamples,
+        tokensPerPage: this.isPdf ? null : settings.tokensPerPage,
+        chapterBreakRegex: settings.chapterBreak || null,
+        minRepetitions: settings.minRepetitions,
+        minSamples: settings.minSamples,
       });
 
-      // Update progress view with the returned job_id
       if (this._progressView && result && result.job_id) {
         this._progressView.setJobId(result.job_id);
+        window.currentJobId = result.job_id;
       }
+      console.info(`analyze_document returned: ${JSON.stringify(result)}`);
     } catch (err) {
       console.error("analyze_document failed:", err);
-      this._restoreSettingsView();
+      await this._restoreSettingsView();
+      this._showAnalysisError(err);
     }
   }
 
@@ -527,8 +540,8 @@ export class ImportSettingsPanel {
   _showProgressView(jobId) {
     this._progressView = new ProgressView(this.container, {
       jobId: jobId,
-      onCancel: () => {
-        this._restoreSettingsView();
+      onCancel: async () => {
+        await this._restoreSettingsView();
       },
       onResume: (resumeJobId) => {
         this._handleResume(resumeJobId);
@@ -537,14 +550,20 @@ export class ImportSettingsPanel {
   }
 
   /** Restore the settings panel after cancellation or error */
-  _restoreSettingsView() {
+  async _restoreSettingsView() {
     if (this._progressView) {
-      this._progressView.destroy();
+      await this._progressView.destroy(false);
       this._progressView = null;
     }
 
     this._buildUI();
     this._attachListeners();
+
+    if (this.filePath) {
+      const fileName = this.filePath.split(/[/\\]/).pop() || this.filePath;
+      this._els.fileName.textContent = fileName;
+      this._els.fileName.title = this.filePath;
+    }
 
     // Restore saved settings if available
     if (this._savedSettings) {
@@ -564,6 +583,46 @@ export class ImportSettingsPanel {
     this._updateEstimate();
   }
 
+  /** Show an analysis error above the settings controls */
+  _showAnalysisError(err) {
+    const message = this._formatInvokeError(err);
+    let banner = this.container.querySelector(".import-analysis-error");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "import-analysis-error";
+      banner.setAttribute("role", "alert");
+      const controls = this.container.querySelector(".import-settings-controls");
+      if (controls) {
+        controls.parentNode.insertBefore(banner, controls);
+      } else {
+        this.container.prepend(banner);
+      }
+    }
+    banner.textContent = `Analysis failed: ${message}`;
+  }
+
+  /**
+   * @param {unknown} err
+   * @returns {string}
+   */
+  _formatInvokeError(err) {
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object") {
+      const o = /** @type {Record<string, unknown>} */ (err);
+      if (typeof o.message === "string") return o.message;
+      const detail = o.detail;
+      if (detail && typeof detail === "object" && typeof detail.message === "string") {
+        return detail.message;
+      }
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    }
+    return String(err);
+  }
+
   /**
    * Handle resume of a partial job
    * @param {string} jobId
@@ -578,10 +637,11 @@ export class ImportSettingsPanel {
         this._progressView.hideResumeBanner();
       }
 
-      await invoke("resume_analysis", { job_id: jobId });
+      await invoke("resume_analysis", { jobId: jobId });
     } catch (err) {
       console.error("resume_analysis failed:", err);
-      this._restoreSettingsView();
+      await this._restoreSettingsView();
+      this._showAnalysisError(err);
     }
   }
 

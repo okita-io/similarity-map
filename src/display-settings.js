@@ -253,11 +253,11 @@ export class DisplaySettingsPanel {
       }
 
       const result = await invoke("raster_pages", {
-        job_id: this.jobId,
+        jobId: this.jobId,
         pages: pages,
         threshold: this._tolerance,
         gamma: this._gamma,
-        hidden_clusters: Array.from(this._hiddenClusters),
+        hiddenClusters: Array.from(this._hiddenClusters),
       });
 
       // Notify caller that pages were updated

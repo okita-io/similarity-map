@@ -8,8 +8,21 @@ import { DisplaySettingsPanel } from "./display-settings.js";
 import { DetailPanel } from "./detail-panel.js";
 import { NavigationController } from "./navigation.js";
 import { ModelDownloadUI } from "./model-download.js";
+import { LogPanel } from "./log-panel.js";
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Init log panel first so subsequent module logs are captured.
+  const logContainer = document.getElementById("log-panel-container");
+  const logPanel = new LogPanel(logContainer);
+  window.logPanel = logPanel;
+
+  const tauri = window.__TAURI__;
+  logPanel.log(
+    "info",
+    "ui",
+    `Tauri globals: ${tauri ? Object.keys(tauri).join(", ") : "none"}`,
+  );
+
   const container = document.getElementById("grid-container");
   const gridRenderer = new GridRenderer(container);
 

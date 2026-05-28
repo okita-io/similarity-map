@@ -432,6 +432,7 @@ pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result
 /// Verifies model presence; triggers download if missing.
 #[tauri::command]
 pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<ModelStatus, AppError> {
+    crate::log_info!(app_handle, "command", "ensure_embedding_model invoked");
     // Resolve the app data directory
     let app_data_dir = app_handle
         .path()
@@ -442,6 +443,12 @@ pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<Mode
                 recoverable: false,
             })
         })?;
+    crate::log_info!(
+        app_handle,
+        "command",
+        "app_data_dir={}",
+        app_data_dir.display()
+    );
 
     let emit_handle = app_handle.clone();
     let progress_callback = move |pct: f32, bytes_received: u64, total_bytes: u64| {
@@ -455,7 +462,17 @@ pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<Mode
         );
     };
 
-    let model_file = model::ensure_model(&app_data_dir, progress_callback).await?;
+    let app_for_log = app_handle.clone();
+    let model_file = match model::ensure_model(&app_data_dir, progress_callback).await {
+        Ok(p) => {
+            crate::log_info!(app_for_log, "command", "model ready at {}", p.display());
+            p
+        }
+        Err(e) => {
+            crate::log_error!(app_for_log, "command", "ensure_model failed: {:?}", e);
+            return Err(e);
+        }
+    };
 
     // Emit model-ready event
     let _ = app_handle.emit(
@@ -563,6 +580,14 @@ pub async fn analyze_document(
     min_repetitions: u32,
     min_samples: u32,
 ) -> Result<AnalysisHandle, AppError> {
+    crate::log_info!(
+        app_handle,
+        "command",
+        "analyze_document invoked: path={} window_size={} stride={}",
+        path,
+        window_size,
+        stride
+    );
     let config = PipelineConfig {
         path,
         window_size,
@@ -573,7 +598,24 @@ pub async fn analyze_document(
         min_samples,
     };
 
-    pipeline::run_pipeline(config, app_handle).await
+    let app_for_log = app_handle.clone();
+    match pipeline::run_pipeline(config, app_handle).await {
+        Ok(handle) => {
+            crate::log_info!(
+                app_for_log,
+                "command",
+                "analyze_document complete: job_id={} pages={} windows={}",
+                handle.job_id,
+                handle.page_count,
+                handle.window_count
+            );
+            Ok(handle)
+        }
+        Err(e) => {
+            crate::log_error!(app_for_log, "command", "analyze_document failed: {:?}", e);
+            Err(e)
+        }
+    }
 }
 
 /// Stops at next batch boundary, commits completed work.
