@@ -88,9 +88,18 @@ Run twice at different phrase lengths (e.g. 20 and 200 tokens) to see both fine-
 
 - **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
 - **Tauri CLI** — `cargo install tauri-cli --version "^2"`
-- **ONNX Runtime** — the `ort` crate uses dynamic loading; you'll need the ONNX Runtime shared library available at runtime
-  - macOS: `brew install onnxruntime` or download from [GitHub releases](https://github.com/microsoft/onnxruntime/releases)
-  - Set `ORT_DYLIB_PATH` to the library location if it's not in a standard search path
+- **ONNX Runtime (required)** — embedding uses the `ort` crate with dynamic loading. You need the ONNX Runtime **native shared library** installed separately from the downloaded `.onnx` model file. Without it, analysis will fail at startup (the app checks on launch).
+  - macOS: `brew install onnxruntime`
+  - Linux (Debian/Ubuntu): install a system `libonnxruntime` package, or build from [GitHub releases](https://github.com/microsoft/onnxruntime/releases)
+  - If the library is not in a standard location, set the full path before running the app:
+    ```bash
+    export ORT_DYLIB_PATH="$(brew --prefix onnxruntime)/lib/libonnxruntime.dylib"   # macOS Homebrew
+    ```
+  - The app probes `ORT_DYLIB_PATH`, then common Homebrew paths (`/opt/homebrew/lib`, `/usr/local/lib` on macOS).
+- **Protocol Buffers compiler (`protoc`)** — required at compile time by LanceDB (`lance-encoding` generates code from `.proto` files)
+  - macOS: `brew install protobuf`
+  - Linux (Debian/Ubuntu): `sudo apt install protobuf-compiler`
+  - If `protoc` is installed but not found: `export PROTOC="$(brew --prefix protobuf)/bin/protoc"` (macOS Homebrew)
 - **System dependencies** (macOS): Xcode Command Line Tools (`xcode-select --install`)
 - **System dependencies** (Linux): `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`
 

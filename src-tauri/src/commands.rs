@@ -6,6 +6,7 @@ use crate::benchmark;
 use crate::cancellation;
 use crate::importer;
 use crate::model;
+use crate::ort_runtime;
 use crate::pipeline::{self, PipelineConfig};
 use crate::rasterizer;
 use crate::types::*;
@@ -433,6 +434,18 @@ pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result
 #[tauri::command]
 pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<ModelStatus, AppError> {
     crate::log_info!(app_handle, "command", "ensure_embedding_model invoked");
+
+    if let Err(e) = ort_runtime::ensure_loaded() {
+        crate::log_error!(
+            app_handle,
+            "command",
+            "ONNX Runtime not available: {:?}",
+            e
+        );
+        return Err(e);
+    }
+    crate::log_info!(app_handle, "command", "ONNX Runtime ready");
+
     // Resolve the app data directory
     let app_data_dir = app_handle
         .path()

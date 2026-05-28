@@ -10,6 +10,7 @@ pub mod events;
 pub mod hash;
 pub mod importer;
 pub mod model;
+pub mod ort_runtime;
 pub mod pipeline;
 pub mod rasterizer;
 pub mod storage;

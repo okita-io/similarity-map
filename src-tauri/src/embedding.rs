@@ -13,6 +13,7 @@ use std::path::Path;
 use ort::session::Session;
 use ort::value::Tensor;
 
+use crate::ort_runtime;
 use crate::types::{AppError, EmbeddingError, Window};
 
 /// Embedding vector dimensionality for all-MiniLM-L6-v2.
@@ -35,6 +36,8 @@ impl EmbeddingEngine {
     /// # Errors
     /// Returns `AppError::Embedding` if the model cannot be loaded.
     pub fn new(model_path: &Path) -> Result<Self, AppError> {
+        ort_runtime::ensure_loaded()?;
+
         let session = Session::builder()
             .and_then(|mut builder| builder.commit_from_file(model_path))
             .map_err(|e| {
