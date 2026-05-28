@@ -58,6 +58,14 @@ export class ImportSettingsPanel {
       <div class="import-settings-panel">
         <h2 class="import-settings-title">Import Settings</h2>
 
+        <div class="import-file-section">
+          <button id="btn-open-file" class="btn-open-file" type="button">
+            <span class="btn-open-file-icon" aria-hidden="true">📄</span>
+            <span class="btn-open-file-text">Open Document</span>
+          </button>
+          <div class="import-file-name" id="import-file-name"></div>
+        </div>
+
         <div class="import-settings-controls">
           <div class="setting-group" id="setting-tokens-per-page">
             <label class="setting-label" for="slider-tokens-per-page">
@@ -180,6 +188,8 @@ export class ImportSettingsPanel {
 
     // Cache element references
     this._els = {
+      btnOpenFile: this.container.querySelector("#btn-open-file"),
+      fileName: this.container.querySelector("#import-file-name"),
       tokensPerPage: this.container.querySelector("#slider-tokens-per-page"),
       phraseLength: this.container.querySelector("#slider-phrase-length"),
       stride: this.container.querySelector("#slider-stride"),
@@ -202,6 +212,11 @@ export class ImportSettingsPanel {
 
   /** Attach event listeners to all controls */
   _attachListeners() {
+    // Open Document button
+    this._els.btnOpenFile.addEventListener("click", () => {
+      this._openFileDialog();
+    });
+
     // Tokens per Page slider
     this._els.tokensPerPage.addEventListener("input", () => {
       const val = Number(this._els.tokensPerPage.value);
@@ -258,6 +273,88 @@ export class ImportSettingsPanel {
     this._els.btnAnalyze.addEventListener("click", () => {
       this._startAnalysis();
     });
+  }
+
+  /** Open a native file dialog to select a document */
+  async _openFileDialog() {
+    const dialogOptions = {
+      multiple: false,
+      directory: false,
+      title: "Open Document",
+      filters: [
+        { name: "Documents", extensions: ["txt", "pdf", "md", "text"] },
+        { name: "Plain Text", extensions: ["txt", "text", "md"] },
+        { name: "PDF", extensions: ["pdf"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    };
+
+    try {
+      const openDialog =
+        window.__TAURI__?.dialog?.open ??
+        (window.__TAURI_INTERNALS__?.invoke
+          ? (opts) =>
+              window.__TAURI_INTERNALS__.invoke("plugin:dialog|open", {
+                options: opts,
+              })
+          : null);
+
+      if (!openDialog) {
+        console.warn("Tauri dialog API not available");
+        return;
+      }
+
+      const selected = await openDialog(dialogOptions);
+
+      if (!selected) return; // User cancelled
+
+      const filePath = typeof selected === "string" ? selected : selected.path;
+      if (!filePath) return;
+
+      const isPdf = filePath.toLowerCase().endsWith(".pdf");
+      const fileName = filePath.split(/[/\\]/).pop() || filePath;
+
+      // Update the file name display
+      this._els.fileName.textContent = fileName;
+      this._els.fileName.title = filePath;
+
+      // Set the file and update estimates
+      this.resetStrideOverride();
+      this.setFile(filePath, isPdf);
+
+      // Check for existing sessions
+      this._checkExistingSession(filePath);
+    } catch (err) {
+      console.error("File dialog failed:", err);
+    }
+  }
+
+  /** Check if there's an existing session for the opened document */
+  async _checkExistingSession(filePath) {
+    try {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (!invoke) return;
+
+      const session = await invoke("check_document_session", { path: filePath });
+
+      if (session && session.complete_job) {
+        // Import SessionDialog dynamically to avoid circular deps
+        const { SessionDialog } = await import("./session-dialog.js");
+        const dialog = new SessionDialog({
+          onRestore: (jobId) => {
+            window.currentJobId = jobId;
+          },
+          onGenerateNew: () => {
+            // User chose to generate new — settings panel is already showing
+          },
+        });
+        dialog.show(session.complete_job);
+      } else if (session && session.partial_job) {
+        this.showResumeBanner(session.partial_job);
+      }
+    } catch (err) {
+      console.warn("check_document_session failed:", err);
+    }
   }
 
   /** Check if tokens_per_page < 4× phrase_length and show warning */

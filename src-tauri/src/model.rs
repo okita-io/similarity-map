@@ -6,16 +6,26 @@ use tokio::io::AsyncWriteExt;
 
 use crate::types::{AppError, ModelError};
 
-/// URL for the all-MiniLM-L6-v2 ONNX model on Hugging Face.
-const MODEL_URL: &str =
-    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx";
+const HF_BASE: &str =
+    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx";
 
-/// Expected SHA-256 hash of the model file.
-/// This is the known hash for the all-MiniLM-L6-v2 ONNX model.
-const MODEL_SHA256: &str = "d6b23e3b1b6e04a2813fad13af0509e3a8b2b92f8b8aa1b0e0e6e4a5e6c1d2f3";
+/// Quantized ONNX (~23 MB) — matches design spec; full `model.onnx` is ~90 MB.
+#[cfg(target_arch = "aarch64")]
+const MODEL_REMOTE_NAME: &str = "model_qint8_arm64.onnx";
 
-/// Minimum valid model file size (1 MB). Files smaller than this are considered corrupt.
-const MIN_MODEL_SIZE: u64 = 1_000_000;
+#[cfg(not(target_arch = "aarch64"))]
+const MODEL_REMOTE_NAME: &str = "model_quint8_avx2.onnx";
+
+fn model_download_url() -> String {
+    format!("{HF_BASE}/{MODEL_REMOTE_NAME}")
+}
+
+/// Expected SHA-256 hash of the cached model (optional integrity check).
+const MODEL_SHA256: &str = "";
+
+/// Quantized ONNX is ~23 MB; reject partial or wrong artifacts outside this band.
+const MIN_MODEL_SIZE: u64 = 20_000_000;
+const MAX_MODEL_SIZE: u64 = 35_000_000;
 
 /// Maximum number of download retry attempts.
 const MAX_RETRIES: u32 = 3;
@@ -31,13 +41,16 @@ pub fn model_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join(MODELS_DIR).join(MODEL_FILENAME)
 }
 
-/// Verify that a model file exists and has a reasonable size (>1MB).
+/// Verify that a model file exists and is the expected quantized size (~23 MB).
 ///
 /// This is a fast check that avoids computing the full SHA-256 hash on every startup.
 /// A full hash verification can be done separately if needed.
 pub fn verify_model(path: &Path) -> bool {
     match std::fs::metadata(path) {
-        Ok(meta) => meta.is_file() && meta.len() >= MIN_MODEL_SIZE,
+        Ok(meta) => {
+            let len = meta.len();
+            meta.is_file() && len >= MIN_MODEL_SIZE && len <= MAX_MODEL_SIZE
+        }
         Err(_) => false,
     }
 }
@@ -46,6 +59,9 @@ pub fn verify_model(path: &Path) -> bool {
 ///
 /// Returns `true` if the hash matches, `false` otherwise.
 pub fn verify_model_hash(path: &Path) -> bool {
+    if MODEL_SHA256.is_empty() {
+        return false;
+    }
     let Ok(data) = std::fs::read(path) else {
         return false;
     };
@@ -139,13 +155,26 @@ async fn download_model_with_retry(
 /// Download the ONNX model from Hugging Face with streaming progress.
 ///
 /// The `progress_callback` receives (percentage 0.0-1.0, bytes_received, total_bytes).
+fn http_client() -> Result<reqwest::Client, AppError> {
+    reqwest::Client::builder()
+        .user_agent(concat!("similarity-map/", env!("CARGO_PKG_VERSION")))
+        .redirect(reqwest::redirect::Policy::default())
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| AppError::Model(ModelError {
+            message: format!("Failed to create HTTP client: {}", e),
+            recoverable: true,
+        }))
+}
+
 pub async fn download_model(
     target_path: &Path,
     progress_callback: &(impl Fn(f32, u64, u64) + Send),
 ) -> Result<(), AppError> {
-    let client = reqwest::Client::new();
+    let client = http_client()?;
+    let url = model_download_url();
 
-    let response = client.get(MODEL_URL).send().await.map_err(|e| {
+    let response = client.get(&url).send().await.map_err(|e| {
         AppError::Model(ModelError {
             message: format!("Failed to connect to model server: {}", e),
             recoverable: true,
@@ -268,8 +297,7 @@ mod tests {
     fn test_verify_model_valid_size() {
         let dir = TempDir::new().unwrap();
         let model_file = dir.path().join("model.onnx");
-        // Write a file larger than MIN_MODEL_SIZE
-        let data = vec![0u8; MIN_MODEL_SIZE as usize + 1];
+        let data = vec![0u8; (MIN_MODEL_SIZE + 1_000_000) as usize];
         std::fs::write(&model_file, &data).unwrap();
         assert!(verify_model(&model_file));
     }
@@ -287,8 +315,7 @@ mod tests {
         std::fs::create_dir_all(&models_dir).unwrap();
 
         let model_file = models_dir.join(MODEL_FILENAME);
-        // Write a valid-sized file
-        let data = vec![0u8; MIN_MODEL_SIZE as usize + 1];
+        let data = vec![0u8; (MIN_MODEL_SIZE + 1_000_000) as usize];
         std::fs::write(&model_file, &data).unwrap();
 
         let result = ensure_model(dir.path(), |_, _, _| {}).await;
@@ -298,10 +325,23 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        assert!(!MODEL_URL.is_empty());
-        assert!(!MODEL_SHA256.is_empty());
-        assert_eq!(MODEL_SHA256.len(), 64); // SHA-256 hex string length
+        assert!(!model_download_url().is_empty());
+        assert!(model_download_url().contains(MODEL_REMOTE_NAME));
         assert!(MIN_MODEL_SIZE > 0);
         assert!(MAX_RETRIES >= 1);
+    }
+
+    /// Requires network. Run with: cargo test test_download_quantized_model -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn test_download_quantized_model() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("downloaded.onnx");
+        download_model(&target, &|pct, received, total| {
+            eprintln!("{:.0}% {} / {}", pct * 100.0, received, total);
+        })
+        .await
+        .expect("download from Hugging Face");
+        assert!(verify_model(&target));
     }
 }

@@ -448,7 +448,7 @@ pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<Mode
         let _ = emit_handle.emit(
             crate::events::MODEL_DOWNLOAD_PROGRESS,
             serde_json::json!({
-                "pct": pct,
+                "pct": (pct * 100.0).clamp(0.0, 100.0),
                 "bytes_received": bytes_received,
                 "total_bytes": total_bytes,
             }),

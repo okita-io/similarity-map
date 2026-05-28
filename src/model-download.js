@@ -94,7 +94,7 @@ export class ModelDownloadUI {
       }
     } catch (err) {
       console.error("ensure_embedding_model failed:", err);
-      this._showErrorBanner(String(err));
+      this._showErrorBanner(this._formatInvokeError(err));
       if (this._onModelUnavailable) {
         this._onModelUnavailable();
       }
@@ -106,7 +106,11 @@ export class ModelDownloadUI {
    * @param {{ pct: number, bytes_received: number, total_bytes: number }} payload
    */
   _handleProgress(payload) {
-    const { pct, bytes_received, total_bytes } = payload;
+    let { pct, bytes_received, total_bytes } = payload;
+    // Backend sends 0–100; tolerate legacy 0–1 payloads.
+    if (pct > 0 && pct <= 1) {
+      pct *= 100;
+    }
     this._showDownloadBanner(pct, bytes_received, total_bytes);
   }
 
@@ -232,6 +236,26 @@ export class ModelDownloadUI {
     const div = document.createElement("div");
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  /**
+   * Extract a readable message from a Tauri invoke error.
+   * @param {unknown} err
+   * @returns {string}
+   */
+  _formatInvokeError(err) {
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object") {
+      const detail = /** @type {{ message?: string }} */ (err).message
+        ?? /** @type {{ detail?: { message?: string } }} */ (err).detail?.message;
+      if (detail) return detail;
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    }
+    return String(err);
   }
 
   /** Clean up event listeners */

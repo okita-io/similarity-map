@@ -82,9 +82,101 @@ Run twice at different phrase lengths (e.g. 20 and 200 tokens) to see both fine-
 | Clustering | HDBSCAN + KMeans stabilization |
 | Frontend | Vanilla JS + Canvas 2D |
 
+## Building from source
+
+### Prerequisites
+
+- **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
+- **Tauri CLI** — `cargo install tauri-cli --version "^2"`
+- **ONNX Runtime** — the `ort` crate uses dynamic loading; you'll need the ONNX Runtime shared library available at runtime
+  - macOS: `brew install onnxruntime` or download from [GitHub releases](https://github.com/microsoft/onnxruntime/releases)
+  - Set `ORT_DYLIB_PATH` to the library location if it's not in a standard search path
+- **System dependencies** (macOS): Xcode Command Line Tools (`xcode-select --install`)
+- **System dependencies** (Linux): `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`
+
+### Development
+
+```bash
+# Clone the repo
+git clone https://github.com/your-org/similarity-map.git
+cd similarity-map
+
+# Run in development mode (hot-reload frontend, Rust rebuilds on change)
+cargo tauri dev
+```
+
+The frontend is plain static files in `src/` — no bundler or `npm install` required.
+
+### Running tests
+
+```bash
+# Run all Rust tests
+cd src-tauri
+cargo test
+```
+
+### Production build
+
+```bash
+# Build a release binary (output in src-tauri/target/release/bundle/)
+cargo tauri build
+```
+
+This produces platform-specific installers (.dmg on macOS, .deb/.AppImage on Linux, .msi on Windows).
+
+### Project structure
+
+```
+similarity-map/
+├── src/                    # Frontend (Vanilla JS + CSS)
+│   ├── index.html
+│   ├── main.js
+│   ├── grid.js             # Grid renderer (ImageBitmap compositing)
+│   ├── zoom.js             # CSS transform zoom controller
+│   ├── tolerance.js        # Frontend-only alpha mask
+│   ├── dither.js           # Spatial dithering at high zoom
+│   ├── import-settings.js  # Import parameter controls
+│   ├── progress-view.js    # Multi-stage progress UI
+│   ├── display-settings.js # Tolerance/gamma/cluster filter
+│   ├── tooltip.js          # Hover tooltips
+│   ├── detail-panel.js     # Click-to-inspect panel
+│   ├── navigation.js       # Counterpart page navigation
+│   ├── session-dialog.js   # Session restore modal
+│   ├── model-download.js   # Model download progress
+│   └── style.css
+├── src-tauri/              # Rust backend
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs
+│       ├── lib.rs
+│       ├── types.rs        # Core types and error enums
+│       ├── commands.rs     # Tauri command handlers
+│       ├── events.rs       # Event name constants
+│       ├── pipeline.rs     # Full analysis orchestrator
+│       ├── importer.rs     # PDF + plain text pagination
+│       ├── windowing.rs    # Sliding window generation
+│       ├── embedding.rs    # ONNX batch embedding
+│       ├── clustering.rs   # HDBSCAN + KMeans stabilization
+│       ├── centroid.rs     # Cluster registry computation
+│       ├── subcell.rs      # Sub-cell position mapping
+│       ├── color.rs        # HSV encoding + blending
+│       ├── rasterizer.rs   # 20×20 RGBA canvas output
+│       ├── storage/        # LanceDB schema + CRUD
+│       ├── model.rs        # ONNX model download/verification
+│       ├── benchmark.rs    # Throughput probe + time estimation
+│       ├── hash.rs         # SHA-256 utilities
+│       ├── cancellation.rs # Cancellation token registry
+│       └── display_state.rs # Display state persistence
+└── .kiro/specs/            # Design specification
+```
+
+### First run
+
+On first launch the app will download the `all-MiniLM-L6-v2` ONNX model (~22 MB) from Hugging Face and cache it in your app data directory. Subsequent launches skip the download.
+
 ## Project status
 
-**Early development** — design and architecture are specified; implementation is in progress.
+Implementation is functionally complete. The full pipeline (import → embed → cluster → rasterize) is wired end-to-end with session persistence, cancellation/resume, and interactive display controls.
 
 For the full technical specification (data model, IPC commands, clustering parameters, UI behavior, and performance notes), see [`Similarity Map - Design Specification.md`](./Similarity%20Map%20-%20Design%20Specification.md).
 

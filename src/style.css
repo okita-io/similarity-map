@@ -106,6 +106,56 @@ body {
   margin-bottom: 4px;
 }
 
+/* Open Document button and file name */
+.import-file-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-open-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.btn-open-file:hover {
+  border-color: var(--text-secondary);
+  background: rgba(15, 52, 96, 0.3);
+}
+
+.btn-open-file:active {
+  background: rgba(15, 52, 96, 0.5);
+}
+
+.btn-open-file-icon {
+  font-size: 18px;
+}
+
+.btn-open-file-text {
+  white-space: nowrap;
+}
+
+.import-file-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 16px;
+}
+
 .import-settings-controls {
   display: flex;
   flex-direction: column;
