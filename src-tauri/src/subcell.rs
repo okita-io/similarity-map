@@ -15,19 +15,43 @@ pub struct WindowSubCellData {
     pub sim_to_centroid: f32,
 }
 
-/// Compute the sub-cell (row, col) position for a window within its page's 20×20 grid.
+const SUB_CELL_COUNT: u32 = 400;
+
+/// Map a character offset on a page to a linear sub-cell index in [0, 399].
+fn char_offset_to_linear_index(char_offset: u32, page_char_count: u32) -> u32 {
+    if page_char_count == 0 {
+        return 0;
+    }
+    let index = ((char_offset as f64 / page_char_count as f64) * SUB_CELL_COUNT as f64).floor() as u32;
+    index.min(SUB_CELL_COUNT - 1)
+}
+
+/// Convert a linear sub-cell index to (row, col) in the 20×20 grid.
+fn linear_index_to_row_col(linear_index: u32) -> (u8, u8) {
+    let clamped = linear_index.min(SUB_CELL_COUNT - 1);
+    ((clamped / 20) as u8, (clamped % 20) as u8)
+}
+
+/// Inclusive range of linear sub-cell indices covered by a window's character span.
 ///
-/// Formula:
-/// - midpoint = floor((char_start + char_end) / 2)
-/// - linear_index = clamp(floor(midpoint / page_char_count × 400), 0, 399)
-/// - row = linear_index / 20, col = linear_index % 20
+/// `char_end` follows windowing semantics: it is the exclusive end index of the
+/// window text slice (`text[char_start..char_end]`).
+pub fn compute_sub_cell_span(char_start: u32, char_end: u32, page_char_count: u32) -> (u32, u32) {
+    if page_char_count == 0 || char_end <= char_start {
+        let idx = char_offset_to_linear_index(char_start, page_char_count.max(1));
+        return (idx, idx);
+    }
+
+    let last_char = char_end.saturating_sub(1);
+    let start = char_offset_to_linear_index(char_start, page_char_count);
+    let end = char_offset_to_linear_index(last_char, page_char_count);
+    (start.min(end), start.max(end))
+}
+
+/// Primary sub-cell for a window (midpoint), used for click targeting and storage.
 pub fn compute_sub_cell(char_start: u32, char_end: u32, page_char_count: u32) -> (u8, u8) {
     let midpoint = (char_start + char_end) / 2;
-    let linear_index = ((midpoint as f64 / page_char_count as f64) * 400.0).floor() as u32;
-    let clamped = linear_index.min(399);
-    let row = (clamped / 20) as u8;
-    let col = (clamped % 20) as u8;
-    (row, col)
+    linear_index_to_row_col(char_offset_to_linear_index(midpoint, page_char_count))
 }
 
 /// Build a `PageSubGrid` for each page from the given window data.
@@ -54,21 +78,24 @@ pub fn build_page_sub_grids(
             None => continue,
         };
 
-        // Compute sub-cell position.
-        let (row, col) = compute_sub_cell(w.char_start, w.char_end, page_char_count);
+        // Paint every sub-cell the window spans (not just its midpoint).
+        let (span_start, span_end) =
+            compute_sub_cell_span(w.char_start, w.char_end, page_char_count);
 
         // Get or create the grid for this page.
         let grid = grids
             .entry(w.page)
             .or_insert_with(|| PageSubGrid::new(w.page));
 
-        // Insert the cluster entry into the sub-cell.
-        let cell = grid.cell_mut(row as usize, col as usize);
-        cell.clusters.push(SubCellCluster {
-            cluster_id: w.cluster_id,
-            sim_to_centroid: w.sim_to_centroid,
-            window_id: w.window_id.clone(),
-        });
+        for linear in span_start..=span_end {
+            let (row, col) = linear_index_to_row_col(linear);
+            let cell = grid.cell_mut(row as usize, col as usize);
+            cell.clusters.push(SubCellCluster {
+                cluster_id: w.cluster_id,
+                sim_to_centroid: w.sim_to_centroid,
+                window_id: w.window_id.clone(),
+            });
+        }
     }
 
     // Sort each sub-cell's clusters by sim_to_centroid descending and cap at 8.
@@ -293,11 +320,30 @@ mod tests {
         assert_eq!(grids[1].page, 2);
         assert_eq!(grids[2].page, 3);
 
-        // Each grid should have exactly 1 cluster entry total.
-        for grid in &grids {
-            let total: usize = grid.cells.iter().map(|c| c.clusters.len()).sum();
-            assert_eq!(total, 1);
-        }
+        // Each window paints every sub-cell in its character span.
+        let page1_filled = grids[0]
+            .cells
+            .iter()
+            .filter(|c| !c.clusters.is_empty())
+            .count();
+        assert_eq!(page1_filled, 40); // chars 0..50 on a 500-char page → indices 0..39
+    }
+
+    #[test]
+    fn test_span_covers_half_page() {
+        let page_char_count = 1000;
+        let (start, end) = compute_sub_cell_span(0, 500, page_char_count);
+        let cells_covered = end - start + 1;
+        // ~50% of the page should cover ~200 of 400 sub-cells.
+        assert!(cells_covered >= 180 && cells_covered <= 220, "expected ~half page, got {cells_covered}");
+    }
+
+    #[test]
+    fn test_span_full_page() {
+        let page_char_count = 800;
+        let (start, end) = compute_sub_cell_span(0, 800, page_char_count);
+        assert_eq!(start, 0);
+        assert_eq!(end, 399);
     }
 
     #[test]
