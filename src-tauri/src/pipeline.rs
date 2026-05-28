@@ -344,6 +344,8 @@ pub async fn run_pipeline(
     );
     let mut eta_estimator = EtaEstimator::new(50);
     let mut windows_done: u32 = 0;
+    // Log roughly every 5% of batches so the log panel shows liveness on long runs.
+    let log_interval = (total_batches / 20).max(1);
 
     // Register cancellation token for this job
     let cancel_token = cancellation::global_registry().register(&job_id).await;
@@ -444,6 +446,19 @@ pub async fn run_pipeline(
             eta,
         );
 
+        if batch_idx % log_interval == 0 || batch_idx + 1 == total_batches {
+            crate::log_info!(
+                app_handle,
+                "pipeline",
+                "embedding batch {}/{} — {} / {} windows (ETA {:.0}s)",
+                batch_idx + 1,
+                total_batches,
+                windows_done,
+                window_count,
+                eta
+            );
+        }
+
         // Update job progress
         let updated_at = chrono::Utc::now().to_rfc3339();
         let _ = store
@@ -453,6 +468,13 @@ pub async fn run_pipeline(
 
     // Unregister the cancellation token now that embedding is complete
     cancellation::global_registry().unregister(&job_id).await;
+
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "embedding complete — {} windows committed",
+        windows_done
+    );
 
     // ─── Stage 6: HDBSCAN Clustering ─────────────────────────────────────────
     emit_stage_progress(
@@ -471,7 +493,16 @@ pub async fn run_pipeline(
         config.stride,
     );
 
+    crate::log_info!(
+        app_handle,
+        "pipeline",
+        "starting HDBSCAN on {} windows (min_cluster_size={}, min_samples={})",
+        window_count,
+        min_cluster_size,
+        config.min_samples
+    );
     let hdbscan_labels = run_hdbscan(&all_embeddings, min_cluster_size, config.min_samples)?;
+    crate::log_info!(app_handle, "pipeline", "HDBSCAN clustering complete");
 
     // ─── Stage 7: KMeans Stabilization ───────────────────────────────────────
     emit_stage_progress(
@@ -485,7 +516,9 @@ pub async fn run_pipeline(
     );
 
     let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
+    crate::log_info!(app_handle, "pipeline", "starting cluster stabilization (KMeans)");
     let stable_labels = stabilize_clusters(&all_embeddings, &hdbscan_labels, &window_indices);
+    crate::log_info!(app_handle, "pipeline", "cluster stabilization complete");
 
     // ─── Stage 8: Compute Centroids and Build Cluster Registry ───────────────
     emit_stage_progress(
