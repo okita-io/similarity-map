@@ -1,0 +1,467 @@
+{
+  "schema_version": "1",
+  "scope": {
+    "chapter": 1,
+    "document_path": "stories/Eternal_Embrace/drafts/chapter_01.md",
+    "document_hash": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+    "scope_char_start": 0,
+    "scope_char_end": 512,
+    "doc_char_start": 0,
+    "doc_char_end": 512
+  },
+  "scope_manifest": {
+    "chapter": 1,
+    "acts": [
+      {
+        "act": 1,
+        "scope_char_start": 0,
+        "scope_char_end": 198,
+        "doc_char_start": 0,
+        "doc_char_end": 198,
+        "paragraphs": [
+          {
+            "paragraph_index": 1,
+            "segment_id": "ch01_a01_p01",
+            "scope_char_start": 0,
+            "scope_char_end": 95,
+            "doc_char_start": 0,
+            "doc_char_end": 95
+          },
+          {
+            "paragraph_index": 2,
+            "segment_id": "ch01_a01_p02",
+            "scope_char_start": 95,
+            "scope_char_end": 198,
+            "doc_char_start": 95,
+            "doc_char_end": 198
+          }
+        ]
+      },
+      {
+        "act": 2,
+        "scope_char_start": 200,
+        "scope_char_end": 512,
+        "doc_char_start": 200,
+        "doc_char_end": 512,
+        "paragraphs": [
+          {
+            "paragraph_index": 1,
+            "segment_id": "ch01_a02_p01",
+            "scope_char_start": 200,
+            "scope_char_end": 312,
+            "doc_char_start": 200,
+            "doc_char_end": 312
+          },
+          {
+            "paragraph_index": 2,
+            "segment_id": "ch01_a02_p02",
+            "scope_char_start": 312,
+            "scope_char_end": 512,
+            "doc_char_start": 312,
+            "doc_char_end": 512
+          }
+        ]
+      }
+    ]
+  },
+  "passes": [
+    {
+      "pass_id": "act-window-50-10",
+      "pass_label": "Act-scoped phrase pass (50/10)",
+      "scope": {
+        "chapter": 1,
+        "act": 1,
+        "scope_char_start": 0,
+        "scope_char_end": 198,
+        "doc_char_start": 0,
+        "doc_char_end": 198
+      },
+      "window_size": 50,
+      "stride": 10,
+      "repetition_report": {
+        "job_id": "ch01-act-pass",
+        "clusters": [
+          {
+            "cluster_id": 1,
+            "representative_text": "the velvet darkness pooled",
+            "instance_count": 2,
+            "total_word_estimate": 8,
+            "canonical": {
+              "location": {
+                "chapter": 1,
+                "act": 1,
+                "paragraph_index": 1,
+                "segment_id": "ch01_a01_p01",
+                "sentence_index": 1,
+                "scope_char_start": 12,
+                "scope_char_end": 38,
+                "doc_char_start": 12,
+                "doc_char_end": 38
+              },
+              "cluster_id": 1,
+              "instance_id": 1,
+              "text": "the velvet darkness pooled",
+              "similarity_to_centroid": 1.0,
+              "member_window_count": 3
+            },
+            "duplicates": [
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 1,
+                  "paragraph_index": 2,
+                  "segment_id": "ch01_a01_p02",
+                  "sentence_index": 1,
+                  "scope_char_start": 110,
+                  "scope_char_end": 136,
+                  "doc_char_start": 110,
+                  "doc_char_end": 136
+                },
+                "cluster_id": 1,
+                "instance_id": 2,
+                "text": "the velvet darkness pooled",
+                "similarity_to_centroid": 0.97,
+                "member_window_count": 2
+              }
+            ],
+            "spans": [
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 1,
+                  "paragraph_index": 1,
+                  "segment_id": "ch01_a01_p01",
+                  "sentence_index": 1,
+                  "scope_char_start": 12,
+                  "scope_char_end": 38,
+                  "doc_char_start": 12,
+                  "doc_char_end": 38
+                },
+                "cluster_id": 1,
+                "instance_id": 1,
+                "text": "the velvet darkness pooled",
+                "similarity_to_centroid": 1.0,
+                "member_window_count": 3
+              },
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 1,
+                  "paragraph_index": 2,
+                  "segment_id": "ch01_a01_p02",
+                  "sentence_index": 1,
+                  "scope_char_start": 110,
+                  "scope_char_end": 136,
+                  "doc_char_start": 110,
+                  "doc_char_end": 136
+                },
+                "cluster_id": 1,
+                "instance_id": 2,
+                "text": "the velvet darkness pooled",
+                "similarity_to_centroid": 0.97,
+                "member_window_count": 2
+              }
+            ],
+            "suggested_op": "remove",
+            "cross_act": false,
+            "needs_bridge": false
+          }
+        ],
+        "stats": {
+          "cluster_count": 1,
+          "total_duplicate_instances": 1,
+          "total_duplicate_words_estimate": 4
+        }
+      }
+    },
+    {
+      "pass_id": "chapter-window-200-50",
+      "pass_label": "Chapter-scoped block pass (200/50)",
+      "scope": {
+        "chapter": 1,
+        "scope_char_start": 0,
+        "scope_char_end": 512,
+        "doc_char_start": 0,
+        "doc_char_end": 512
+      },
+      "window_size": 200,
+      "stride": 50,
+      "tokens_per_page": 400,
+      "repetition_report": {
+        "job_id": "ch01-chapter-pass",
+        "clusters": [
+          {
+            "cluster_id": 1,
+            "representative_text": "She stepped into the moonlit gallery, heart hammering.",
+            "instance_count": 2,
+            "total_word_estimate": 16,
+            "canonical": {
+              "location": {
+                "chapter": 1,
+                "act": 1,
+                "paragraph_index": 2,
+                "segment_id": "ch01_a01_p02",
+                "sentence_index": 2,
+                "scope_char_start": 140,
+                "scope_char_end": 198,
+                "doc_char_start": 140,
+                "doc_char_end": 198
+              },
+              "cluster_id": 1,
+              "instance_id": 1,
+              "text": "She stepped into the moonlit gallery, heart hammering.",
+              "similarity_to_centroid": 1.0,
+              "member_window_count": 4
+            },
+            "duplicates": [
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 2,
+                  "paragraph_index": 1,
+                  "segment_id": "ch01_a02_p01",
+                  "sentence_index": 1,
+                  "scope_char_start": 200,
+                  "scope_char_end": 312,
+                  "doc_char_start": 200,
+                  "doc_char_end": 312
+                },
+                "cluster_id": 1,
+                "instance_id": 2,
+                "text": "She stepped into the moonlit gallery, heart hammering again.",
+                "similarity_to_centroid": 0.88,
+                "member_window_count": 3
+              }
+            ],
+            "spans": [
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 1,
+                  "paragraph_index": 2,
+                  "segment_id": "ch01_a01_p02",
+                  "sentence_index": 2,
+                  "scope_char_start": 140,
+                  "scope_char_end": 198,
+                  "doc_char_start": 140,
+                  "doc_char_end": 198
+                },
+                "cluster_id": 1,
+                "instance_id": 1,
+                "text": "She stepped into the moonlit gallery, heart hammering.",
+                "similarity_to_centroid": 1.0,
+                "member_window_count": 4
+              },
+              {
+                "location": {
+                  "chapter": 1,
+                  "act": 2,
+                  "paragraph_index": 1,
+                  "segment_id": "ch01_a02_p01",
+                  "sentence_index": 1,
+                  "scope_char_start": 200,
+                  "scope_char_end": 312,
+                  "doc_char_start": 200,
+                  "doc_char_end": 312
+                },
+                "cluster_id": 1,
+                "instance_id": 2,
+                "text": "She stepped into the moonlit gallery, heart hammering again.",
+                "similarity_to_centroid": 0.88,
+                "member_window_count": 3
+              }
+            ],
+            "suggested_op": "bridge",
+            "cross_act": true,
+            "needs_bridge": true
+          }
+        ],
+        "stats": {
+          "cluster_count": 1,
+          "total_duplicate_instances": 1,
+          "total_duplicate_words_estimate": 8
+        }
+      }
+    }
+  ],
+  "merged_repetition_report": {
+    "job_id": "ch01-merged",
+    "clusters": [
+      {
+        "cluster_id": 1,
+        "representative_text": "the velvet darkness pooled",
+        "instance_count": 2,
+        "total_word_estimate": 8,
+        "canonical": {
+          "location": {
+            "chapter": 1,
+            "act": 1,
+            "paragraph_index": 1,
+            "segment_id": "ch01_a01_p01",
+            "sentence_index": 1,
+            "scope_char_start": 12,
+            "scope_char_end": 38,
+            "doc_char_start": 12,
+            "doc_char_end": 38
+          },
+          "cluster_id": 1,
+          "instance_id": 1,
+          "text": "the velvet darkness pooled",
+          "similarity_to_centroid": 1.0,
+          "member_window_count": 3
+        },
+        "duplicates": [
+          {
+            "location": {
+              "chapter": 1,
+              "act": 1,
+              "paragraph_index": 2,
+              "segment_id": "ch01_a01_p02",
+              "sentence_index": 1,
+              "scope_char_start": 110,
+              "scope_char_end": 136,
+              "doc_char_start": 110,
+              "doc_char_end": 136
+            },
+            "cluster_id": 1,
+            "instance_id": 2,
+            "text": "the velvet darkness pooled",
+            "similarity_to_centroid": 0.97,
+            "member_window_count": 2
+          }
+        ],
+        "spans": [
+          {
+            "location": {
+              "chapter": 1,
+              "act": 1,
+              "paragraph_index": 1,
+              "segment_id": "ch01_a01_p01",
+              "sentence_index": 1,
+              "scope_char_start": 12,
+              "scope_char_end": 38,
+              "doc_char_start": 12,
+              "doc_char_end": 38
+            },
+            "cluster_id": 1,
+            "instance_id": 1,
+            "text": "the velvet darkness pooled",
+            "similarity_to_centroid": 1.0,
+            "member_window_count": 3
+          },
+          {
+            "location": {
+              "chapter": 1,
+              "act": 1,
+              "paragraph_index": 2,
+              "segment_id": "ch01_a01_p02",
+              "sentence_index": 1,
+              "scope_char_start": 110,
+              "scope_char_end": 136,
+              "doc_char_start": 110,
+              "doc_char_end": 136
+            },
+            "cluster_id": 1,
+            "instance_id": 2,
+            "text": "the velvet darkness pooled",
+            "similarity_to_centroid": 0.97,
+            "member_window_count": 2
+          }
+        ],
+        "suggested_op": "remove",
+        "cross_act": false,
+        "needs_bridge": false
+      },
+      {
+        "cluster_id": 2,
+        "representative_text": "She stepped into the moonlit gallery, heart hammering.",
+        "instance_count": 2,
+        "total_word_estimate": 16,
+        "canonical": {
+          "location": {
+            "chapter": 1,
+            "act": 1,
+            "paragraph_index": 2,
+            "segment_id": "ch01_a01_p02",
+            "sentence_index": 2,
+            "scope_char_start": 140,
+            "scope_char_end": 198,
+            "doc_char_start": 140,
+            "doc_char_end": 198
+          },
+          "cluster_id": 2,
+          "instance_id": 1,
+          "text": "She stepped into the moonlit gallery, heart hammering.",
+          "similarity_to_centroid": 1.0,
+          "member_window_count": 4
+        },
+        "duplicates": [
+          {
+            "location": {
+              "chapter": 1,
+              "act": 2,
+              "paragraph_index": 1,
+              "segment_id": "ch01_a02_p01",
+              "sentence_index": 1,
+              "scope_char_start": 200,
+              "scope_char_end": 312,
+              "doc_char_start": 200,
+              "doc_char_end": 312
+            },
+            "cluster_id": 2,
+            "instance_id": 2,
+            "text": "She stepped into the moonlit gallery, heart hammering again.",
+            "similarity_to_centroid": 0.88,
+            "member_window_count": 3
+          }
+        ],
+        "spans": [
+          {
+            "location": {
+              "chapter": 1,
+              "act": 1,
+              "paragraph_index": 2,
+              "segment_id": "ch01_a01_p02",
+              "sentence_index": 2,
+              "scope_char_start": 140,
+              "scope_char_end": 198,
+              "doc_char_start": 140,
+              "doc_char_end": 198
+            },
+            "cluster_id": 2,
+            "instance_id": 1,
+            "text": "She stepped into the moonlit gallery, heart hammering.",
+            "similarity_to_centroid": 1.0,
+            "member_window_count": 4
+          },
+          {
+            "location": {
+              "chapter": 1,
+              "act": 2,
+              "paragraph_index": 1,
+              "segment_id": "ch01_a02_p01",
+              "sentence_index": 1,
+              "scope_char_start": 200,
+              "scope_char_end": 312,
+              "doc_char_start": 200,
+              "doc_char_end": 312
+            },
+            "cluster_id": 2,
+            "instance_id": 2,
+            "text": "She stepped into the moonlit gallery, heart hammering again.",
+            "similarity_to_centroid": 0.88,
+            "member_window_count": 3
+          }
+        ],
+        "suggested_op": "bridge",
+        "cross_act": true,
+        "needs_bridge": true
+      }
+    ],
+    "stats": {
+      "cluster_count": 2,
+      "total_duplicate_instances": 2,
+      "total_duplicate_words_estimate": 12
+    }
+  }
+}

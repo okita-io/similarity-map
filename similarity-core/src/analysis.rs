@@ -7,6 +7,7 @@ use crate::clustering::{
     cluster_by_kmeans_similarity, derive_min_cluster_size, merge_subsumed_clusters, run_hdbscan,
     stabilize_clusters, validate_clustering_params,
 };
+use crate::report::ScopeManifest;
 use crate::subcell::{build_page_sub_grids, WindowSubCellData};
 use crate::types::{
     AppError, ClusterRegistry, ImportError, Page, ValidationError, Window,
@@ -34,10 +35,19 @@ pub struct ClusteringArtifacts {
 }
 
 /// Paginate plain text using the same settings as file import.
+///
+/// When `manifest` is provided, paginates one page per act segment via
+/// [`crate::importer::paginate_scope`] so sliding windows never cross act boundaries.
+/// Token/chapter pagination is unchanged when `manifest` is `None`.
 pub fn paginate_text(
     text: &str,
     params: &AnalysisParams,
+    manifest: Option<&ScopeManifest>,
 ) -> Result<Vec<Page>, AppError> {
+    if let Some(manifest) = manifest {
+        return crate::importer::paginate_scope(manifest, text);
+    }
+
     if text.is_empty() || text.chars().all(|c| c.is_whitespace()) {
         return Err(AppError::Import(ImportError {
             message: "Text contains no analyzable content".to_string(),

@@ -176,6 +176,41 @@ fn is_sentence_terminator(ch: char) -> bool {
     matches!(ch, '.' | '!' | '?')
 }
 
+/// 1-based sentence index within `text` for a byte offset (shared rules with expansion).
+pub fn sentence_index_at_char_offset(text: &str, byte_offset: usize) -> u32 {
+    if text.is_empty() {
+        return 1;
+    }
+    let offset = byte_offset.min(text.len());
+    let mut index = 1u32;
+    let mut sentence_start = 0usize;
+    let mut scan = 0usize;
+
+    while scan < text.len() {
+        if let Some((rel, ch)) = text[scan..].char_indices().next() {
+            let abs = scan + rel;
+            if is_sentence_terminator(ch) {
+                let after = abs + ch.len_utf8();
+                let rest = text.get(after..).unwrap_or("");
+                if rest.is_empty() || rest.chars().next().is_some_and(|c| c.is_whitespace()) {
+                    if offset >= sentence_start && offset <= after {
+                        return index;
+                    }
+                    index += 1;
+                    sentence_start = skip_leading_whitespace(text, after);
+                    scan = sentence_start;
+                    continue;
+                }
+            }
+            scan = abs + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    index
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +250,14 @@ mod tests {
             &text[exp_start as usize..exp_end as usize],
             "Para two has text."
         );
+    }
+
+    #[test]
+    fn sentence_index_at_offset() {
+        let text = "First sentence. Second one here! Third.";
+        let second_start = "First sentence. ".len();
+        assert_eq!(sentence_index_at_char_offset(text, second_start), 2);
+        assert_eq!(sentence_index_at_char_offset(text, 0), 1);
+        assert_eq!(sentence_index_at_char_offset(text, text.len()), 3);
     }
 }

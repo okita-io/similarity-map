@@ -212,6 +212,10 @@ Implementation is functionally complete. The full pipeline (import → embed →
 
 For the full technical specification (data model, IPC commands, clustering parameters, UI behavior, and performance notes), see [`Similarity Map - Design Specification.md`](./Similarity%20Map%20-%20Design%20Specification.md).
 
+### Romance Factory JSON export (RepetitionReport v1)
+
+Pipeline-consumable analysis output for the RF surgical editor is defined in [`.kiro/specs/similarity-map/integration-contract.md`](./.kiro/specs/similarity-map/integration-contract.md). Rust types: `similarity-core/src/contract.rs`. JSON Schema: `similarity-core/schemas/analysis_output_v1.schema.json`. Example fixture: `similarity-core/fixtures/analysis_output_v1.example.json`.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
