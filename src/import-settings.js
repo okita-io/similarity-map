@@ -2,6 +2,8 @@
 // Tauri 2 IPC via window.__TAURI__.core.invoke
 
 import { ProgressView } from "./progress-view.js";
+import { bindSliderNumberInput } from "./slider-input.js";
+import { activateJob } from "./job-activation.js";
 
 /**
  * @typedef {Object} AnalysisEstimate
@@ -45,6 +47,8 @@ export class ImportSettingsPanel {
       stride: 5, // max(1, floor(20 * 0.25))
       minRepetitions: 3,
       minSamples: 3,
+      enableHdbscan: true,
+      linkSubphrases: false,
       chapterBreak: "^Chapter\\s+\\d+",
     };
 
@@ -72,7 +76,18 @@ export class ImportSettingsPanel {
         <div class="import-settings-controls">
           <div class="setting-group" id="setting-tokens-per-page">
             <label class="setting-label" for="slider-tokens-per-page">
-              Tokens per Page: <span class="setting-value" id="value-tokens-per-page">${this._defaults.tokensPerPage}</span>
+              <span>Tokens per Page:</span>
+              <input
+                type="number"
+                id="input-tokens-per-page"
+                class="setting-number-input"
+                min="200"
+                max="2000"
+                step="10"
+                value="${this._defaults.tokensPerPage}"
+                aria-label="Tokens per Page value"
+                ${this.isPdf ? "disabled" : ""}
+              />
             </label>
             <input
               type="range"
@@ -91,7 +106,17 @@ export class ImportSettingsPanel {
 
           <div class="setting-group">
             <label class="setting-label" for="slider-phrase-length">
-              Phrase Length: <span class="setting-value" id="value-phrase-length">${this._defaults.phraseLength}</span>
+              <span>Phrase Length:</span>
+              <input
+                type="number"
+                id="input-phrase-length"
+                class="setting-number-input"
+                min="5"
+                max="1500"
+                step="1"
+                value="${this._defaults.phraseLength}"
+                aria-label="Phrase Length value"
+              />
             </label>
             <input
               type="range"
@@ -107,7 +132,17 @@ export class ImportSettingsPanel {
 
           <div class="setting-group">
             <label class="setting-label" for="slider-stride">
-              Stride: <span class="setting-value" id="value-stride">${this._defaults.stride}</span>
+              <span>Stride:</span>
+              <input
+                type="number"
+                id="input-stride"
+                class="setting-number-input"
+                min="1"
+                max="200"
+                step="1"
+                value="${this._defaults.stride}"
+                aria-label="Stride value"
+              />
             </label>
             <input
               type="range"
@@ -123,7 +158,17 @@ export class ImportSettingsPanel {
 
           <div class="setting-group">
             <label class="setting-label" for="slider-min-repetitions">
-              Min Repetitions: <span class="setting-value" id="value-min-repetitions">${this._defaults.minRepetitions}</span>
+              <span>Min Repetitions:</span>
+              <input
+                type="number"
+                id="input-min-repetitions"
+                class="setting-number-input"
+                min="2"
+                max="20"
+                step="1"
+                value="${this._defaults.minRepetitions}"
+                aria-label="Min Repetitions value"
+              />
             </label>
             <input
               type="range"
@@ -139,7 +184,17 @@ export class ImportSettingsPanel {
 
           <div class="setting-group">
             <label class="setting-label" for="slider-min-samples">
-              Min Samples: <span class="setting-value" id="value-min-samples">${this._defaults.minSamples}</span>
+              <span>Min Samples:</span>
+              <input
+                type="number"
+                id="input-min-samples"
+                class="setting-number-input"
+                min="1"
+                max="10"
+                step="1"
+                value="${this._defaults.minSamples}"
+                aria-label="Min Samples value"
+              />
             </label>
             <input
               type="range"
@@ -151,6 +206,37 @@ export class ImportSettingsPanel {
               value="${this._defaults.minSamples}"
               aria-label="Min Samples"
             />
+            <span class="setting-note" id="note-min-samples">HDBSCAN noise sensitivity — higher is stricter</span>
+          </div>
+
+          <div class="setting-group setting-checkbox-group">
+            <label class="setting-checkbox-label" for="checkbox-enable-hdbscan">
+              <input
+                type="checkbox"
+                id="checkbox-enable-hdbscan"
+                class="setting-checkbox"
+                ${this._defaults.enableHdbscan ? "checked" : ""}
+              />
+              Enable HDBSCAN density scan
+            </label>
+            <span class="setting-note" id="note-enable-hdbscan">
+              When off, grouping uses KMeans similarity only (Min Samples is ignored).
+            </span>
+          </div>
+
+          <div class="setting-group setting-checkbox-group">
+            <label class="setting-checkbox-label" for="checkbox-link-subphrases">
+              <input
+                type="checkbox"
+                id="checkbox-link-subphrases"
+                class="setting-checkbox"
+                ${this._defaults.linkSubphrases ? "checked" : ""}
+              />
+              Link subphrases to parent blocks
+            </label>
+            <span class="setting-note" id="note-link-subphrases">
+              Merge short repeated phrases into larger repeated paragraphs so they share one color.
+            </span>
           </div>
 
           <div class="setting-group">
@@ -194,16 +280,18 @@ export class ImportSettingsPanel {
       btnOpenFile: this.container.querySelector("#btn-open-file"),
       fileName: this.container.querySelector("#import-file-name"),
       tokensPerPage: this.container.querySelector("#slider-tokens-per-page"),
+      inputTokensPerPage: this.container.querySelector("#input-tokens-per-page"),
       phraseLength: this.container.querySelector("#slider-phrase-length"),
+      inputPhraseLength: this.container.querySelector("#input-phrase-length"),
       stride: this.container.querySelector("#slider-stride"),
+      inputStride: this.container.querySelector("#input-stride"),
       minRepetitions: this.container.querySelector("#slider-min-repetitions"),
+      inputMinRepetitions: this.container.querySelector("#input-min-repetitions"),
       minSamples: this.container.querySelector("#slider-min-samples"),
+      inputMinSamples: this.container.querySelector("#input-min-samples"),
+      enableHdbscan: this.container.querySelector("#checkbox-enable-hdbscan"),
+      linkSubphrases: this.container.querySelector("#checkbox-link-subphrases"),
       chapterBreak: this.container.querySelector("#input-chapter-break"),
-      valueTokensPerPage: this.container.querySelector("#value-tokens-per-page"),
-      valuePhraseLength: this.container.querySelector("#value-phrase-length"),
-      valueStride: this.container.querySelector("#value-stride"),
-      valueMinRepetitions: this.container.querySelector("#value-min-repetitions"),
-      valueMinSamples: this.container.querySelector("#value-min-samples"),
       warningTokensPerPage: this.container.querySelector("#warning-tokens-per-page"),
       errorChapterBreak: this.container.querySelector("#error-chapter-break"),
       estimateWindowCount: this.container.querySelector("#estimate-window-count"),
@@ -220,51 +308,55 @@ export class ImportSettingsPanel {
       this._openFileDialog();
     });
 
-    // Tokens per Page slider
-    this._els.tokensPerPage.addEventListener("input", () => {
-      const val = Number(this._els.tokensPerPage.value);
-      this._els.valueTokensPerPage.textContent = val;
-      this._checkTokensWarning();
-      this._scheduleEstimateUpdate();
-    });
-
-    // Phrase Length slider — auto-computes stride
-    this._els.phraseLength.addEventListener("input", () => {
+    const onPhraseLengthChange = () => {
       const val = Number(this._els.phraseLength.value);
-      this._els.valuePhraseLength.textContent = val;
-
-      // Auto-compute stride unless user manually set it
       if (!this._strideManuallySet) {
         const newStride = Math.max(1, Math.floor(val * 0.25));
         this._els.stride.value = newStride;
-        this._els.valueStride.textContent = newStride;
+        this._els.inputStride.value = newStride;
       }
-
       this._checkTokensWarning();
       this._scheduleEstimateUpdate();
+    };
+
+    bindSliderNumberInput(this._els.tokensPerPage, this._els.inputTokensPerPage, {
+      onInput: () => {
+        this._checkTokensWarning();
+        this._scheduleEstimateUpdate();
+      },
     });
 
-    // Stride slider — mark as manually set
-    this._els.stride.addEventListener("input", () => {
-      this._strideManuallySet = true;
-      const val = Number(this._els.stride.value);
-      this._els.valueStride.textContent = val;
+    bindSliderNumberInput(this._els.phraseLength, this._els.inputPhraseLength, {
+      onInput: onPhraseLengthChange,
+      onChange: onPhraseLengthChange,
+    });
+
+    bindSliderNumberInput(this._els.stride, this._els.inputStride, {
+      onInput: () => {
+        this._strideManuallySet = true;
+        this._scheduleEstimateUpdate();
+      },
+      onChange: () => {
+        this._strideManuallySet = true;
+        this._scheduleEstimateUpdate();
+      },
+    });
+
+    bindSliderNumberInput(this._els.minRepetitions, this._els.inputMinRepetitions, {
+      onInput: () => this._scheduleEstimateUpdate(),
+    });
+
+    bindSliderNumberInput(this._els.minSamples, this._els.inputMinSamples, {
+      onInput: () => this._scheduleEstimateUpdate(),
+    });
+
+    // HDBSCAN enable checkbox — disable Min Samples when bypassed
+    this._els.enableHdbscan.addEventListener("change", () => {
+      this._updateHdbscanDependentControls();
       this._scheduleEstimateUpdate();
     });
 
-    // Min Repetitions slider
-    this._els.minRepetitions.addEventListener("input", () => {
-      const val = Number(this._els.minRepetitions.value);
-      this._els.valueMinRepetitions.textContent = val;
-      this._scheduleEstimateUpdate();
-    });
-
-    // Min Samples slider
-    this._els.minSamples.addEventListener("input", () => {
-      const val = Number(this._els.minSamples.value);
-      this._els.valueMinSamples.textContent = val;
-      this._scheduleEstimateUpdate();
-    });
+    this._updateHdbscanDependentControls();
 
     // Chapter Break regex input
     this._els.chapterBreak.addEventListener("input", () => {
@@ -324,6 +416,10 @@ export class ImportSettingsPanel {
       // Set the file and update estimates
       this.resetStrideOverride();
       this.setFile(filePath, isPdf);
+
+      if (window.resultsPanel) {
+        void window.resultsPanel.refresh();
+      }
 
       // Check for existing sessions
       this._checkExistingSession(filePath);
@@ -549,6 +645,8 @@ export class ImportSettingsPanel {
         chapterBreakRegex: settings.chapterBreak || null,
         minRepetitions: settings.minRepetitions,
         minSamples: settings.minSamples,
+        enableHdbscan: settings.enableHdbscan,
+        linkSubphrases: settings.linkSubphrases,
       });
 
       console.info(`analyze_document returned: ${JSON.stringify(result)}`);
@@ -574,41 +672,7 @@ export class ImportSettingsPanel {
    * @param {number} pageCount
    */
   async _activateJob(jobId, pageCount) {
-    window.currentJobId = jobId;
-
-    const grid = window.gridRenderer;
-    if (grid && pageCount > 0) {
-      grid.initGrid(pageCount);
-    }
-
-    const display = window.displaySettingsPanel;
-    if (display) {
-      display.setJobId(jobId);
-      display.setAllPages(
-        Array.from({ length: pageCount }, (_, i) => i + 1),
-      );
-      if (grid) {
-        display.setCanvases(grid._canvases);
-      }
-    }
-
-    const invoke = window.__TAURI__?.core?.invoke;
-    if (!invoke) return;
-
-    try {
-      await invoke("restore_session", { jobId });
-    } catch (err) {
-      console.error("restore_session failed:", err);
-    }
-
-    try {
-      const registry = await invoke("get_cluster_registry", { jobId });
-      if (display && registry?.clusters) {
-        display.setClusters(Object.values(registry.clusters));
-      }
-    } catch (err) {
-      console.warn("get_cluster_registry failed:", err);
-    }
+    await activateJob(jobId, pageCount);
   }
 
   /**
@@ -616,6 +680,19 @@ export class ImportSettingsPanel {
    */
   async _onAnalysisComplete(result) {
     await this._activateJob(result.job_id, result.page_count);
+    if (window.resultsPanel && this.filePath) {
+      const catalog = await window.__TAURI__?.core?.invoke?.("list_document_results", {
+        path: this.filePath,
+      });
+      const entry = catalog?.results?.find((item) => item.job_id === result.job_id);
+      if (entry) {
+        await window.__TAURI__.core.invoke("set_active_document_result", {
+          path: this.filePath,
+          resultId: entry.result_id,
+        });
+      }
+      await window.resultsPanel.refresh(entry?.result_id);
+    }
     await this._restoreSettingsView();
   }
 
@@ -654,16 +731,19 @@ export class ImportSettingsPanel {
     // Restore saved settings if available
     if (this._savedSettings) {
       this._els.tokensPerPage.value = this._savedSettings.tokensPerPage;
-      this._els.valueTokensPerPage.textContent = this._savedSettings.tokensPerPage;
+      this._els.inputTokensPerPage.value = this._savedSettings.tokensPerPage;
       this._els.phraseLength.value = this._savedSettings.phraseLength;
-      this._els.valuePhraseLength.textContent = this._savedSettings.phraseLength;
+      this._els.inputPhraseLength.value = this._savedSettings.phraseLength;
       this._els.stride.value = this._savedSettings.stride;
-      this._els.valueStride.textContent = this._savedSettings.stride;
+      this._els.inputStride.value = this._savedSettings.stride;
       this._els.minRepetitions.value = this._savedSettings.minRepetitions;
-      this._els.valueMinRepetitions.textContent = this._savedSettings.minRepetitions;
+      this._els.inputMinRepetitions.value = this._savedSettings.minRepetitions;
       this._els.minSamples.value = this._savedSettings.minSamples;
-      this._els.valueMinSamples.textContent = this._savedSettings.minSamples;
+      this._els.inputMinSamples.value = this._savedSettings.minSamples;
+      this._els.enableHdbscan.checked = this._savedSettings.enableHdbscan;
+      this._els.linkSubphrases.checked = this._savedSettings.linkSubphrases;
       this._els.chapterBreak.value = this._savedSettings.chapterBreak;
+      this._updateHdbscanDependentControls();
     }
 
     this._updateEstimate();
@@ -752,8 +832,21 @@ export class ImportSettingsPanel {
       stride: Number(this._els.stride.value),
       minRepetitions: Number(this._els.minRepetitions.value),
       minSamples: Number(this._els.minSamples.value),
+      enableHdbscan: this._els.enableHdbscan.checked,
+      linkSubphrases: this._els.linkSubphrases.checked,
       chapterBreak: this._els.chapterBreak.value.trim(),
     };
+  }
+
+  /** Gray out Min Samples when HDBSCAN is bypassed */
+  _updateHdbscanDependentControls() {
+    const enabled = this._els.enableHdbscan.checked;
+    this._els.minSamples.disabled = !enabled;
+    this._els.inputMinSamples.disabled = !enabled;
+    const note = this.container.querySelector("#note-min-samples");
+    if (note) {
+      note.hidden = enabled;
+    }
   }
 
   /**
@@ -767,6 +860,7 @@ export class ImportSettingsPanel {
 
     // Disable/enable tokens per page for PDF
     this._els.tokensPerPage.disabled = isPdf;
+    this._els.inputTokensPerPage.disabled = isPdf;
     const settingGroup = this.container.querySelector("#setting-tokens-per-page");
     const existingNote = settingGroup.querySelector(".setting-note");
     if (isPdf && !existingNote) {

@@ -14,7 +14,10 @@ use uuid::Uuid;
 
 use crate::cancellation::{self};
 use crate::centroid::{build_cluster_registry, WindowData};
-use crate::clustering::{derive_min_cluster_size, run_hdbscan, stabilize_clusters, validate_clustering_params};
+use crate::clustering::{
+    cluster_by_kmeans_similarity, derive_min_cluster_size, merge_subsumed_clusters, run_hdbscan,
+    stabilize_clusters, validate_clustering_params,
+};
 use crate::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
 use crate::events;
 use crate::hash::{compute_document_hash, compute_settings_hash};
@@ -35,6 +38,10 @@ pub struct PipelineConfig {
     pub chapter_break_regex: Option<String>,
     pub min_repetitions: u32,
     pub min_samples: u32,
+    /// When true (default), run HDBSCAN density clustering before KMeans stabilization.
+    pub enable_hdbscan: bool,
+    /// When true, merge short phrase clusters into parent blocks and scan 5-token sub-windows.
+    pub link_subphrases: bool,
 }
 
 /// Rolling ETA estimator using a sliding window of the last N batch durations.
@@ -184,6 +191,39 @@ async fn persist_clustered_windows(
     Ok(())
 }
 
+/// Run clustering (HDBSCAN + KMeans, or KMeans-only) and optional subphrase merging.
+fn run_clustering(
+    config: &PipelineConfig,
+    all_embeddings: &[Vec<f32>],
+    windows: &[Window],
+) -> Result<(Vec<i32>, Vec<i32>), AppError> {
+    let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
+    let min_cluster_size = derive_min_cluster_size(
+        config.min_repetitions,
+        config.window_size,
+        config.stride,
+    );
+
+    let (hdbscan_labels, mut stable_labels) = if config.enable_hdbscan {
+        let labels = run_hdbscan(all_embeddings, min_cluster_size, config.min_samples)?;
+        let stable = stabilize_clusters(all_embeddings, &labels, &window_indices);
+        (labels, stable)
+    } else {
+        let stable =
+            cluster_by_kmeans_similarity(all_embeddings, &window_indices, min_cluster_size)?;
+        let labels = vec![-1i32; all_embeddings.len()];
+        (labels, stable)
+    };
+
+    if config.link_subphrases {
+        let texts: Vec<String> = windows.iter().map(|w| w.text.clone()).collect();
+        let pages: Vec<u32> = windows.iter().map(|w| w.page).collect();
+        merge_subsumed_clusters(&mut stable_labels, all_embeddings, &texts, &pages);
+    }
+
+    Ok((hdbscan_labels, stable_labels))
+}
+
 /// Emit a page-ready event with the rasterized canvas.
 fn emit_page_ready(app_handle: &tauri::AppHandle, job_id: &str, page: u32, canvas_b64: &str) {
     let _ = app_handle.emit(
@@ -288,6 +328,8 @@ pub async fn run_pipeline(
         config.tokens_per_page,
         config.min_repetitions,
         config.min_samples,
+        config.enable_hdbscan,
+        config.link_subphrases,
     );
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -553,32 +595,28 @@ pub async fn run_pipeline(
         config.stride,
     );
 
-    crate::log_info!(
-        app_handle,
-        "pipeline",
-        "starting HDBSCAN on {} windows (min_cluster_size={}, min_samples={})",
-        window_count,
-        min_cluster_size,
-        config.min_samples
-    );
-    let hdbscan_labels = run_hdbscan(&all_embeddings, min_cluster_size, config.min_samples)?;
-    crate::log_info!(app_handle, "pipeline", "HDBSCAN clustering complete");
+    if config.enable_hdbscan {
+        crate::log_info!(
+            app_handle,
+            "pipeline",
+            "starting HDBSCAN on {} windows (min_cluster_size={}, min_samples={})",
+            window_count,
+            min_cluster_size,
+            config.min_samples
+        );
+    } else {
+        crate::log_info!(
+            app_handle,
+            "pipeline",
+            "HDBSCAN bypassed — using KMeans similarity grouping on {} windows (min_cluster_size={})",
+            window_count,
+            min_cluster_size
+        );
+    }
 
-    // ─── Stage 7: KMeans Stabilization ───────────────────────────────────────
-    emit_stage_progress(
-        &app_handle,
-        &job_id,
-        Stage::Stabilization,
-        0.0,
-        windows_done,
-        window_count,
-        0.0,
-    );
-
-    let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
-    crate::log_info!(app_handle, "pipeline", "starting cluster stabilization (KMeans)");
-    let stable_labels = stabilize_clusters(&all_embeddings, &hdbscan_labels, &window_indices);
-    crate::log_info!(app_handle, "pipeline", "cluster stabilization complete");
+    let (hdbscan_labels, stable_labels) =
+        run_clustering(&config, &all_embeddings, &windows)?;
+    crate::log_info!(app_handle, "pipeline", "clustering complete");
 
     // ─── Stage 8: Compute Centroids and Build Cluster Registry ───────────────
     emit_stage_progress(
@@ -601,6 +639,8 @@ pub async fn run_pipeline(
             cluster_id: stable_labels[i],
             embedding: all_embeddings[i].clone(),
             text: w.text.clone(),
+            doc_char_start: w.doc_char_start,
+            doc_char_end: w.doc_char_start + w.char_end.saturating_sub(w.char_start),
         })
         .collect();
 
@@ -813,6 +853,8 @@ pub async fn resume_pipeline(
         chapter_break_regex: job.chapter_break_re.clone(),
         min_repetitions: job.min_repetitions,
         min_samples: job.min_samples,
+        enable_hdbscan: true,
+        link_subphrases: false,
     };
 
     let pages = import_document(file_path, &config)?;
@@ -981,27 +1023,8 @@ pub async fn resume_pipeline(
         0.0,
     );
 
-    let min_cluster_size = derive_min_cluster_size(
-        config.min_repetitions,
-        config.window_size,
-        config.stride,
-    );
-
-    let hdbscan_labels = run_hdbscan(&all_embeddings, min_cluster_size, config.min_samples)?;
-
-    // KMeans Stabilization
-    emit_stage_progress(
-        &app_handle,
-        &job_id,
-        Stage::Stabilization,
-        0.0,
-        windows_done,
-        windows_total,
-        0.0,
-    );
-
-    let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
-    let stable_labels = stabilize_clusters(&all_embeddings, &hdbscan_labels, &window_indices);
+    let (hdbscan_labels, stable_labels) =
+        run_clustering(&config, &all_embeddings, &windows)?;
 
     // Centroid computation
     emit_stage_progress(
@@ -1024,6 +1047,8 @@ pub async fn resume_pipeline(
             cluster_id: stable_labels[i],
             embedding: all_embeddings[i].clone(),
             text: w.text.clone(),
+            doc_char_start: w.doc_char_start,
+            doc_char_end: w.doc_char_start + w.char_end.saturating_sub(w.char_start),
         })
         .collect();
 
@@ -1289,6 +1314,8 @@ mod tests {
             chapter_break_regex: None,
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_ok());
     }
@@ -1303,6 +1330,8 @@ mod tests {
             chapter_break_regex: None,
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_err());
     }
@@ -1317,6 +1346,8 @@ mod tests {
             chapter_break_regex: None,
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_err());
     }
@@ -1331,6 +1362,8 @@ mod tests {
             chapter_break_regex: None,
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_err());
     }
@@ -1345,6 +1378,8 @@ mod tests {
             chapter_break_regex: Some("[invalid(".to_string()),
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_err());
     }
@@ -1359,6 +1394,8 @@ mod tests {
             chapter_break_regex: None,
             min_repetitions: 3,
             min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
         };
         assert!(validate_params(&config).is_err());
     }

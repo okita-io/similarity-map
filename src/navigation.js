@@ -73,7 +73,7 @@ export class NavigationController {
 
     // Position the overlay relative to the canvas.
     // The canvas is 20×20 native pixels, each sub-cell is 1×1 native pixel.
-    // We use percentage-based positioning so it scales with CSS zoom.
+    // We use percentage-based positioning so it scales with cell display size.
     const leftPct = (col / CELL_SIZE) * 100;
     const topPct = (row / CELL_SIZE) * 100;
     const sizePct = (1 / CELL_SIZE) * 100;
@@ -91,36 +91,25 @@ export class NavigationController {
   }
 
   /**
-   * Scroll the target element into view within the scroll parent,
-   * accounting for CSS transform scaling on the grid container.
+   * Scroll the target element into view within the scroll parent.
    *
    * @param {HTMLCanvasElement} target
    * @param {HTMLElement} scrollParent
    * @private
    */
   _scrollIntoView(target, scrollParent) {
-    // Get the zoom level from the CSS variable
-    const zoom = parseFloat(
-      getComputedStyle(this._gridContainer).getPropertyValue("--zoom")
-    ) || 1;
-
-    // Calculate the target's position relative to the grid container
-    const gridRect = this._gridContainer.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
-
-    // Compute the offset within the scroll parent
     const parentRect = scrollParent.getBoundingClientRect();
 
-    const targetCenterX = targetRect.left + targetRect.width / 2 - parentRect.left + scrollParent.scrollLeft;
-    const targetCenterY = targetRect.top + targetRect.height / 2 - parentRect.top + scrollParent.scrollTop;
-
-    const scrollX = targetCenterX - parentRect.width / 2;
-    const scrollY = targetCenterY - parentRect.height / 2;
+    const targetCenterX =
+      targetRect.left + targetRect.width / 2 - parentRect.left + scrollParent.scrollLeft;
+    const targetCenterY =
+      targetRect.top + targetRect.height / 2 - parentRect.top + scrollParent.scrollTop;
 
     scrollParent.scrollTo({
-      left: Math.max(0, scrollX),
-      top: Math.max(0, scrollY),
-      behavior: "smooth"
+      left: Math.max(0, targetCenterX - parentRect.width / 2),
+      top: Math.max(0, targetCenterY - parentRect.height / 2),
+      behavior: "smooth",
     });
   }
 

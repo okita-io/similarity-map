@@ -22,6 +22,8 @@ pub fn compute_settings_hash(
     tokens_per_page: Option<u32>,
     min_repetitions: u32,
     min_samples: u32,
+    enable_hdbscan: bool,
+    link_subphrases: bool,
 ) -> String {
     let tokens_per_page_str = match tokens_per_page {
         Some(v) => v.to_string(),
@@ -29,8 +31,14 @@ pub fn compute_settings_hash(
     };
 
     let canonical = format!(
-        "window_size={}|stride={}|tokens_per_page={}|min_repetitions={}|min_samples={}",
-        window_size, stride, tokens_per_page_str, min_repetitions, min_samples
+        "window_size={}|stride={}|tokens_per_page={}|min_repetitions={}|min_samples={}|enable_hdbscan={}|link_subphrases={}",
+        window_size,
+        stride,
+        tokens_per_page_str,
+        min_repetitions,
+        min_samples,
+        enable_hdbscan,
+        link_subphrases
     );
 
     let mut hasher = Sha256::new();
@@ -47,56 +55,56 @@ mod tests {
 
     #[test]
     fn settings_hash_deterministic_same_params() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(20, 5, Some(400), 3, 3);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn settings_hash_different_window_size() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(25, 5, Some(400), 3, 3);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(25, 5, Some(400), 3, 3, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_different_stride() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(20, 10, Some(400), 3, 3);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 10, Some(400), 3, 3, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_different_tokens_per_page() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(20, 5, Some(800), 3, 3);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 5, Some(800), 3, 3, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_none_vs_some_tokens_per_page() {
-        let h1 = compute_settings_hash(20, 5, None, 3, 3);
-        let h2 = compute_settings_hash(20, 5, Some(400), 3, 3);
+        let h1 = compute_settings_hash(20, 5, None, 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_different_min_repetitions() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(20, 5, Some(400), 5, 3);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 5, Some(400), 5, 3, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_different_min_samples() {
-        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3);
-        let h2 = compute_settings_hash(20, 5, Some(400), 3, 5);
+        let h1 = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
+        let h2 = compute_settings_hash(20, 5, Some(400), 3, 5, true, false);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn settings_hash_is_valid_sha256_hex() {
-        let h = compute_settings_hash(20, 5, Some(400), 3, 3);
+        let h = compute_settings_hash(20, 5, Some(400), 3, 3, true, false);
         assert_eq!(h.len(), 64);
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }

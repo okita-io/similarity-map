@@ -1,10 +1,8 @@
-// Grid Renderer — manages the 10-column CSS grid of 20×20 page canvases.
+// Grid Renderer — manages a flowing flex-wrap layout of 20×20 page canvases.
 // Listens for similarity-map:page-ready events and progressively populates cells.
 
 const CELL_SIZE = 20; // pixels per page cell (native resolution)
-const COLUMNS = 10;
 const MAX_PAGES = 300;
-const SMOOTH_THRESHOLD = 100; // px on longest dimension to switch rendering mode
 const DEFAULT_BG = "rgb(34, 34, 42)"; // visible baseline for processed/empty pages
 
 /**
@@ -60,7 +58,6 @@ export class GridRenderer {
       this._container.parentElement.appendChild(overflow);
     }
 
-    this._updateRenderingMode();
   }
 
   /**
@@ -115,24 +112,6 @@ export class GridRenderer {
   setGap(gap) {
     const clamped = Math.max(0, Math.min(4, Math.round(gap)));
     document.documentElement.style.setProperty("--grid-gap", `${clamped}px`);
-  }
-
-  /**
-   * Check the rendered cell size and toggle image-rendering mode.
-   * Call this after zoom or resize changes.
-   */
-  _updateRenderingMode() {
-    const firstCanvas = this._canvases.get(1);
-    if (!firstCanvas) return;
-
-    const rect = firstCanvas.getBoundingClientRect();
-    const longest = Math.max(rect.width, rect.height);
-
-    if (longest >= SMOOTH_THRESHOLD) {
-      this._container.classList.add("smooth-rendering");
-    } else {
-      this._container.classList.remove("smooth-rendering");
-    }
   }
 
   /**

@@ -112,8 +112,17 @@ pub struct ClusterInfo {
     pub most_central_window_id: String,
     pub most_central_window_text: String,
     pub member_count: u32,
+    /// Distinct repetition instances after merging overlapping windows.
+    pub instance_count: u32,
     /// Sorted page numbers where cluster appears
     pub pages: Vec<u32>,
+}
+
+/// A re-rasterized page canvas returned to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageRasterPayload {
+    pub page: u32,
+    pub canvas_rgba_b64: String,
 }
 
 // ─── Display Types ───────────────────────────────────────────────────────────
@@ -245,6 +254,7 @@ pub struct CancelResult {
 pub struct RestoreHandle {
     pub job_id: String,
     pub page_count: u32,
+    pub display_state: DisplayState,
 }
 
 /// Detail data for a specific sub-cell click.

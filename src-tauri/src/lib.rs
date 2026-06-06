@@ -9,10 +9,12 @@ pub mod embedding;
 pub mod events;
 pub mod hash;
 pub mod importer;
+pub mod job_data;
 pub mod model;
 pub mod ort_runtime;
 pub mod pipeline;
 pub mod rasterizer;
+pub mod results_catalog;
 pub mod storage;
 pub mod subcell;
 pub mod types;
@@ -37,6 +39,11 @@ pub fn run() {
             get_page_detail,
             get_cluster_registry,
             save_display_state,
+            list_document_results,
+            save_document_result,
+            save_document_result_as,
+            delete_document_result,
+            set_active_document_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

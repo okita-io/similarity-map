@@ -5,6 +5,7 @@ import { GridRenderer } from "./grid.js";
 import { ZoomController } from "./zoom.js";
 import { ImportSettingsPanel } from "./import-settings.js";
 import { DisplaySettingsPanel } from "./display-settings.js";
+import { ResultsPanel } from "./results-panel.js";
 import { DetailPanel } from "./detail-panel.js";
 import { NavigationController } from "./navigation.js";
 import { ModelDownloadUI } from "./model-download.js";
@@ -26,12 +27,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const container = document.getElementById("grid-container");
   const gridRenderer = new GridRenderer(container);
 
-  // Zoom controller — CSS-only scaling, no bitmap allocation on zoom/scroll
-  const zoomController = new ZoomController(container, {
-    onZoomChange: () => {
-      gridRenderer._updateRenderingMode();
-    }
-  });
+  // Zoom controller — cell size scales via --zoom; #main scrolls the layout
+  const zoomController = new ZoomController(container);
 
   // Import Settings Panel
   const importSettingsContainer = document.getElementById("import-settings-container");
@@ -59,7 +56,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Display Settings Panel
   const displaySettingsContainer = document.getElementById("display-settings-container");
-  const displaySettingsPanel = new DisplaySettingsPanel(displaySettingsContainer);
+  const displaySettingsPanel = new DisplaySettingsPanel(displaySettingsContainer, {
+    onPagesUpdated: async (pages) => {
+      for (const pageCanvas of pages) {
+        await gridRenderer.updatePage(pageCanvas.page, pageCanvas.canvas_rgba_b64);
+      }
+    },
+  });
+
+  // Saved Results Panel
+  const resultsPanelContainer = document.getElementById("results-panel-container");
+  const resultsPanel = new ResultsPanel(resultsPanelContainer, {
+    getDocumentPath: () =>
+      importSettingsPanel.filePath || null,
+  });
 
   // Navigation Controller — counterpart link navigation
   const navigationController = new NavigationController(container);
@@ -81,18 +91,13 @@ document.addEventListener("DOMContentLoaded", () => {
   window.zoomController = zoomController;
   window.importSettingsPanel = importSettingsPanel;
   window.displaySettingsPanel = displaySettingsPanel;
+  window.resultsPanel = resultsPanel;
   window.navigationController = navigationController;
   window.detailPanel = detailPanel;
   window.modelDownloadUI = modelDownloadUI;
 
   // Start listening for page-ready events from the backend
   gridRenderer.startListening();
-
-  // Handle window resize to update image-rendering mode (CSS scaling only, req 29.4)
-  const resizeObserver = new ResizeObserver(() => {
-    gridRenderer._updateRenderingMode();
-  });
-  resizeObserver.observe(container);
 
   console.log("Similarity Map initialized");
 });

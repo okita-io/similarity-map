@@ -7,6 +7,7 @@
   --text-secondary: #a0a0a0;
   --accent: #0f3460;
   --grid-gap: 1px;
+  --page-display-size: 120px;
 }
 
 * {
@@ -51,26 +52,26 @@ body {
   overflow: auto;
   padding: 20px;
   min-width: 0;
+  min-height: 0;
 }
 
 #grid-container {
+  --cell-size: var(--page-display-size);
   --zoom: 1;
-  display: grid;
-  grid-template-columns: repeat(10, 20px);
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
   gap: var(--grid-gap);
-  transform: scale(var(--zoom));
-  transform-origin: top left;
+  width: 100%;
 }
 
 #grid-container canvas {
-  width: 20px;
-  height: 20px;
+  width: calc(var(--cell-size) * var(--zoom));
+  height: calc(var(--cell-size) * var(--zoom));
+  flex: 0 0 auto;
   display: block;
   image-rendering: pixelated;
-}
-
-#grid-container.smooth-rendering canvas {
-  image-rendering: auto;
+  image-rendering: crisp-edges;
 }
 
 .grid-overflow {
@@ -174,6 +175,27 @@ body {
   gap: 4px;
 }
 
+.setting-checkbox-group {
+  gap: 6px;
+}
+
+.setting-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.setting-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--text-primary);
+  flex-shrink: 0;
+}
+
 .setting-label {
   font-size: 12px;
   color: var(--text-secondary);
@@ -185,6 +207,42 @@ body {
 .setting-value {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.setting-number-input {
+  width: 4.5rem;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.setting-number-input:focus {
+  border-color: var(--text-secondary);
+}
+
+.setting-number-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Hide browser spinner buttons for cleaner look */
+.setting-number-input::-webkit-outer-spin-button,
+.setting-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.setting-number-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* Slider styling */
@@ -364,6 +422,18 @@ body {
 .sidebar-panel-right {
   border-right: none;
   border-left: 1px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.right-sidebar-section {
+  padding: 16px;
+}
+
+.results-panel-section {
+  margin-top: auto;
+  border-top: 1px solid var(--accent);
 }
 
 .display-settings-panel {
@@ -436,6 +506,84 @@ body {
   color: var(--text-secondary);
   font-size: 11px;
   flex-shrink: 0;
+}
+
+/* === Saved Results Panel === */
+
+.results-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.results-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.results-panel-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.results-select,
+.results-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.results-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.results-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.btn-result-action {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-result-action:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+}
+
+.btn-result-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-result-delete {
+  color: #ffb4b4;
+}
+
+.results-status {
+  min-height: 1.2em;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.results-status[data-kind="error"] {
+  color: #ffb4b4;
 }
 
 
@@ -683,8 +831,14 @@ body {
 .cell-wrapper {
   position: relative;
   display: block;
-  width: 20px;
-  height: 20px;
+  flex: 0 0 auto;
+  width: calc(var(--cell-size) * var(--zoom));
+  height: calc(var(--cell-size) * var(--zoom));
+}
+
+.cell-wrapper canvas {
+  width: 100%;
+  height: 100%;
 }
 
 /* 1.5-second pulse animation on target macro-cell */

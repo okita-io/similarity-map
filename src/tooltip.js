@@ -88,15 +88,15 @@ export class TooltipManager {
       return;
     }
 
-    const zoom = this._getZoom();
     const tolerance = this._getTolerance();
-    const subCellPx = zoom; // At zoom=1, each sub-cell is 1px (20px cell / 20 sub-cells)
+    const cellRect = canvas.getBoundingClientRect();
+    const subCellPx = cellRect.width / CELL_SIZE;
 
     let content;
 
     if (subCellPx >= SUB_CELL_TOOLTIP_THRESHOLD) {
       // Sub-cell tooltip mode
-      const subCell = this._getSubCellFromEvent(e, canvas, zoom);
+      const subCell = this._getSubCellFromEvent(e, canvas);
       if (!subCell) {
         this._hide();
         return;
@@ -128,20 +128,15 @@ export class TooltipManager {
    * @private
    * @param {MouseEvent} e
    * @param {HTMLCanvasElement} canvas
-   * @param {number} zoom
    * @returns {{row: number, col: number} | null}
    */
-  _getSubCellFromEvent(e, canvas, zoom) {
+  _getSubCellFromEvent(e, canvas) {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // The canvas is displayed at CELL_SIZE * zoom pixels
-    const displaySize = CELL_SIZE * zoom;
-
-    // Convert pixel position to sub-cell coordinates
-    const col = Math.floor((x / displaySize) * CELL_SIZE);
-    const row = Math.floor((y / displaySize) * CELL_SIZE);
+    const col = Math.floor((x / rect.width) * CELL_SIZE);
+    const row = Math.floor((y / rect.height) * CELL_SIZE);
 
     if (row < 0 || row >= CELL_SIZE || col < 0 || col >= CELL_SIZE) {
       return null;

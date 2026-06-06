@@ -96,6 +96,12 @@ pub fn run_hdbscan(
     Ok(labels)
 }
 
+/// Cosine similarity floor for KMeans-only grouping (bypasses HDBSCAN density filter).
+const KMEANS_SIMILARITY_THRESHOLD: f32 = 0.82;
+
+/// Centroid similarity floor when merging a short phrase cluster into a parent block.
+const SUBPHRASE_MERGE_THRESHOLD: f32 = 0.85;
+
 /// Fixed random seed for KMeans reproducibility.
 const KMEANS_SEED: u64 = 42;
 
@@ -104,6 +110,246 @@ const KMEANS_MAX_ITER: u64 = 300;
 
 /// Tolerance for KMeans convergence.
 const KMEANS_TOLERANCE: f64 = 1e-4;
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let denom = norm_a * norm_b;
+    if denom == 0.0 {
+        0.0
+    } else {
+        dot / denom
+    }
+}
+
+/// Groups windows purely by embedding similarity, then stabilizes with KMeans.
+///
+/// Used when HDBSCAN is bypassed. Windows are processed in `window_index` order;
+/// each window joins the most similar existing cluster if cosine similarity ≥
+/// [`KMEANS_SIMILARITY_THRESHOLD`], otherwise it seeds a new group. Groups smaller
+/// than `min_cluster_size` are treated as noise (-1).
+pub fn cluster_by_kmeans_similarity(
+    embeddings: &[Vec<f32>],
+    window_indices: &[u32],
+    min_cluster_size: u32,
+) -> Result<Vec<i32>, AppError> {
+    if embeddings.is_empty() {
+        return Err(AppError::Clustering(ClusteringError {
+            message: "No embeddings provided for clustering".to_string(),
+        }));
+    }
+
+    let n = embeddings.len();
+    let mut sorted: Vec<usize> = (0..n).collect();
+    sorted.sort_by_key(|&i| window_indices[i]);
+
+    let mut cluster_centroids: Vec<Vec<f32>> = Vec::new();
+    let mut cluster_members: Vec<Vec<usize>> = Vec::new();
+    let mut raw_labels = vec![-1i32; n];
+
+    for &idx in &sorted {
+        let emb = &embeddings[idx];
+        let mut best_cluster: Option<usize> = None;
+        let mut best_sim = KMEANS_SIMILARITY_THRESHOLD;
+
+        for (cid, centroid) in cluster_centroids.iter().enumerate() {
+            let sim = cosine_similarity(emb, centroid);
+            if sim >= best_sim {
+                best_sim = sim;
+                best_cluster = Some(cid);
+            }
+        }
+
+        match best_cluster {
+            Some(cid) => {
+                raw_labels[idx] = cid as i32;
+                cluster_members[cid].push(idx);
+                let count = cluster_members[cid].len() as f32;
+                for (dim, val) in emb.iter().enumerate() {
+                    cluster_centroids[cid][dim] += (val - cluster_centroids[cid][dim]) / count;
+                }
+            }
+            None => {
+                let cid = cluster_centroids.len();
+                raw_labels[idx] = cid as i32;
+                cluster_centroids.push(emb.clone());
+                cluster_members.push(vec![idx]);
+            }
+        }
+    }
+
+    for (cid, members) in cluster_members.iter().enumerate() {
+        if (members.len() as u32) < min_cluster_size {
+            for &idx in members {
+                raw_labels[idx] = -1;
+            }
+            let _ = cid;
+        }
+    }
+
+    if !raw_labels.iter().any(|&label| label >= 0) {
+        return Err(AppError::Clustering(ClusteringError {
+            message: "No clusters found with KMeans similarity grouping. \
+                      Try lowering Min Repetitions or enabling HDBSCAN."
+                .to_string(),
+        }));
+    }
+
+    Ok(stabilize_clusters(embeddings, &raw_labels, window_indices))
+}
+
+/// Merge clusters where a shorter repeated phrase is part of a larger repeated block.
+///
+/// When two clusters have similar centroids and the shorter cluster's window texts
+/// appear as substrings within the longer cluster's windows (on the same page),
+/// the shorter cluster is folded into the longer one so they share a single color.
+pub fn merge_subsumed_clusters(
+    labels: &mut [i32],
+    embeddings: &[Vec<f32>],
+    window_texts: &[String],
+    pages: &[u32],
+) {
+    let mut groups: HashMap<i32, Vec<usize>> = HashMap::new();
+    for (i, &label) in labels.iter().enumerate() {
+        if label >= 0 {
+            groups.entry(label).or_default().push(i);
+        }
+    }
+
+    if groups.len() < 2 {
+        return;
+    }
+
+    let mut centroids: HashMap<i32, Vec<f32>> = HashMap::new();
+    let mut avg_text_len: HashMap<i32, f32> = HashMap::new();
+    for (&cluster_id, members) in &groups {
+        let dim = embeddings[members[0]].len();
+        let mut centroid = vec![0.0f32; dim];
+        let mut text_len_sum = 0usize;
+        for &idx in members {
+            for (d, val) in embeddings[idx].iter().enumerate() {
+                centroid[d] += val;
+            }
+            text_len_sum += window_texts[idx].len();
+        }
+        let n = members.len() as f32;
+        for val in centroid.iter_mut() {
+            *val /= n;
+        }
+        centroids.insert(cluster_id, centroid);
+        avg_text_len.insert(cluster_id, text_len_sum as f32 / n);
+    }
+
+    let cluster_ids: Vec<i32> = groups.keys().copied().collect();
+    for i in 0..cluster_ids.len() {
+        for j in (i + 1)..cluster_ids.len() {
+            let a = cluster_ids[i];
+            let b = cluster_ids[j];
+            let sim = cosine_similarity(
+                centroids.get(&a).unwrap(),
+                centroids.get(&b).unwrap(),
+            );
+            if sim < SUBPHRASE_MERGE_THRESHOLD {
+                continue;
+            }
+
+            let (child, parent) = if avg_text_len.get(&a).unwrap() < avg_text_len.get(&b).unwrap()
+            {
+                (a, b)
+            } else {
+                (b, a)
+            };
+
+            if !cluster_is_subsumed(child, parent, &groups, window_texts, pages) {
+                continue;
+            }
+
+            for label in labels.iter_mut() {
+                if *label == child {
+                    *label = parent;
+                }
+            }
+        }
+    }
+
+    renumber_cluster_labels(labels);
+}
+
+fn cluster_is_subsumed(
+    child: i32,
+    parent: i32,
+    groups: &HashMap<i32, Vec<usize>>,
+    window_texts: &[String],
+    pages: &[u32],
+) -> bool {
+    let child_members = match groups.get(&child) {
+        Some(m) => m,
+        None => return false,
+    };
+    let parent_members = match groups.get(&parent) {
+        Some(m) => m,
+        None => return false,
+    };
+
+    let mut subsumed_count = 0usize;
+    for &child_idx in child_members {
+        let child_text = window_texts[child_idx].trim();
+        if child_text.is_empty() {
+            continue;
+        }
+        let child_page = pages[child_idx];
+        let is_subspan = parent_members.iter().any(|&parent_idx| {
+            pages[parent_idx] == child_page
+                && window_texts[parent_idx]
+                    .to_lowercase()
+                    .contains(&child_text.to_lowercase())
+        });
+        if is_subspan {
+            subsumed_count += 1;
+        }
+    }
+
+    subsumed_count * 2 >= child_members.len()
+}
+
+fn renumber_cluster_labels(labels: &mut [i32]) {
+    let mut mapping: HashMap<i32, i32> = HashMap::new();
+    let mut next_id = 0i32;
+    for label in labels.iter_mut() {
+        if *label >= 0 {
+            let stable = *mapping.entry(*label).or_insert_with(|| {
+                let id = next_id;
+                next_id += 1;
+                id
+            });
+            *label = stable;
+        }
+    }
+}
+
+/// Assign auxiliary short windows to the nearest cluster centroid.
+pub fn assign_to_nearest_clusters(
+    aux_embeddings: &[Vec<f32>],
+    cluster_centroids: &HashMap<i32, Vec<f32>>,
+    similarity_threshold: f32,
+) -> Vec<i32> {
+    aux_embeddings
+        .iter()
+        .map(|emb| {
+            let mut best_id = -1i32;
+            let mut best_sim = similarity_threshold;
+            for (&cluster_id, centroid) in cluster_centroids {
+                let sim = cosine_similarity(emb, centroid);
+                if sim >= best_sim {
+                    best_sim = sim;
+                    best_id = cluster_id;
+                }
+            }
+            best_id
+        })
+        .collect()
+}
 
 /// Stabilizes HDBSCAN cluster assignments using KMeans.
 ///

@@ -11,6 +11,40 @@ pub struct WindowData {
     pub cluster_id: i32,
     pub embedding: Vec<f32>,
     pub text: String,
+    /// Inclusive document character start.
+    pub doc_char_start: u32,
+    /// Exclusive document character end.
+    pub doc_char_end: u32,
+}
+
+/// Group overlapping document spans into distinct repetition instances.
+///
+/// Sliding windows from stride < phrase length often overlap; this merges
+/// any spans that share document text into one instance.
+pub fn count_overlapping_instances(spans: &[(u32, u32)]) -> u32 {
+    if spans.is_empty() {
+        return 0;
+    }
+
+    let mut sorted: Vec<(u32, u32)> = spans
+        .iter()
+        .map(|&(start, end)| (start, end.max(start)))
+        .collect();
+    sorted.sort_by_key(|span| span.0);
+
+    let mut instances = 1u32;
+    let mut run_end = sorted[0].1;
+
+    for &(start, end) in sorted.iter().skip(1) {
+        if start >= run_end {
+            instances += 1;
+            run_end = end;
+        } else {
+            run_end = run_end.max(end);
+        }
+    }
+
+    instances
 }
 
 /// Compute cosine similarity between two vectors.
@@ -101,6 +135,12 @@ pub fn build_cluster_registry(windows: &[WindowData]) -> ClusterRegistry {
         pages.sort_unstable();
         pages.dedup();
 
+        let spans: Vec<(u32, u32)> = members
+            .iter()
+            .map(|w| (w.doc_char_start, w.doc_char_end))
+            .collect();
+        let instance_count = count_overlapping_instances(&spans);
+
         // Compute hue using golden-ratio formula
         let hue = ((*cluster_id as f64 * 0.6180339887) % 1.0) as f32;
 
@@ -113,6 +153,7 @@ pub fn build_cluster_registry(windows: &[WindowData]) -> ClusterRegistry {
                 most_central_window_id: best.window_id.clone(),
                 most_central_window_text: best.text.clone(),
                 member_count: members.len() as u32,
+                instance_count,
                 pages,
             },
         );
@@ -134,6 +175,7 @@ mod tests {
         embedding: Vec<f32>,
         text: &str,
     ) -> WindowData {
+        let doc_char_start = window_index * 100;
         WindowData {
             window_id: window_id.to_string(),
             window_index,
@@ -141,6 +183,8 @@ mod tests {
             cluster_id,
             embedding,
             text: text.to_string(),
+            doc_char_start,
+            doc_char_end: doc_char_start + 50,
         }
     }
 
@@ -298,6 +342,53 @@ mod tests {
 
         assert_eq!(registry.clusters.get(&1).unwrap().member_count, 3);
         assert_eq!(registry.clusters.get(&2).unwrap().member_count, 2);
+    }
+
+    #[test]
+    fn test_count_overlapping_instances_merges_runs() {
+        let spans = vec![(0, 100), (50, 150), (80, 180), (300, 400)];
+        assert_eq!(count_overlapping_instances(&spans), 2);
+    }
+
+    #[test]
+    fn test_instance_count_merges_overlapping_windows() {
+        let windows = vec![
+            WindowData {
+                window_id: "w1".to_string(),
+                window_index: 0,
+                page: 1,
+                cluster_id: 1,
+                embedding: vec![1.0, 0.0],
+                text: "a".to_string(),
+                doc_char_start: 0,
+                doc_char_end: 100,
+            },
+            WindowData {
+                window_id: "w2".to_string(),
+                window_index: 1,
+                page: 1,
+                cluster_id: 1,
+                embedding: vec![0.9, 0.1],
+                text: "b".to_string(),
+                doc_char_start: 40,
+                doc_char_end: 140,
+            },
+            WindowData {
+                window_id: "w3".to_string(),
+                window_index: 2,
+                page: 1,
+                cluster_id: 1,
+                embedding: vec![0.8, 0.2],
+                text: "c".to_string(),
+                doc_char_start: 500,
+                doc_char_end: 600,
+            },
+        ];
+
+        let registry = build_cluster_registry(&windows);
+        let info = registry.clusters.get(&1).unwrap();
+        assert_eq!(info.member_count, 3);
+        assert_eq!(info.instance_count, 2);
     }
 
     #[test]

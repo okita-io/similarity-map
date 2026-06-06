@@ -1,14 +1,13 @@
-// Zoom Controller — manages CSS-transform-based zoom on the grid container.
-// No ImageBitmap allocation on zoom/scroll; only CSS transforms change.
+// Zoom Controller — scales page cells via CSS variables (no transform scaling).
+// Cell display size = --cell-size × --zoom; #main scrolls the laid-out content.
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 10;
 const ZOOM_STEP = 0.5;
 
 /**
- * ZoomController applies CSS transform scaling to the grid container.
- * Zoom changes only update a CSS variable and transform — no canvas
- * re-computation or ImageBitmap allocation occurs.
+ * ZoomController updates the --zoom CSS variable on the grid container.
+ * Cells grow in place so scroll extents match the visible layout inside #main.
  */
 export class ZoomController {
   /**
@@ -40,7 +39,6 @@ export class ZoomController {
 
   /**
    * Set the zoom level. Clamped to [MIN_ZOOM, MAX_ZOOM].
-   * Only updates CSS transform — no bitmap allocation.
    * @param {number} level
    */
   setZoom(level) {
@@ -68,15 +66,9 @@ export class ZoomController {
     this.setZoom(1);
   }
 
-  /**
-   * Apply the current zoom as a CSS transform on the container.
-   * Uses transform-origin: top left so scaling expands downward/rightward.
-   * @private
-   */
+  /** @private */
   _applyZoom() {
-    this._container.style.setProperty("--zoom", this._zoom);
-    this._container.style.transform = `scale(${this._zoom})`;
-    this._container.style.transformOrigin = "top left";
+    this._container.style.setProperty("--zoom", String(this._zoom));
   }
 
   /**
@@ -119,7 +111,6 @@ export class ZoomController {
   /** @private */
   _attachListeners() {
     document.addEventListener("keydown", this._handleKeyDown);
-    // Attach wheel to the scrollable parent so zoom works when hovering the grid
     const scrollParent = this._container.closest("#main") || this._container.parentElement;
     if (scrollParent) {
       scrollParent.addEventListener("wheel", this._handleWheel, { passive: false });

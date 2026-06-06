@@ -100,8 +100,7 @@ export class DetailPanel {
     const page = parseInt(canvas.dataset.page, 10);
     if (isNaN(page)) return;
 
-    const zoom = this._getZoom();
-    const subCell = this._getSubCellFromEvent(e, canvas, zoom);
+    const subCell = this._getSubCellFromEvent(e, canvas);
 
     if (subCell) {
       this._fetchAndDisplay(page, subCell.row, subCell.col);
@@ -116,18 +115,15 @@ export class DetailPanel {
    * @private
    * @param {MouseEvent} e
    * @param {HTMLCanvasElement} canvas
-   * @param {number} zoom
    * @returns {{row: number, col: number} | null}
    */
-  _getSubCellFromEvent(e, canvas, zoom) {
+  _getSubCellFromEvent(e, canvas) {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const displaySize = CELL_SIZE * zoom;
-
-    const col = Math.floor((x / displaySize) * CELL_SIZE);
-    const row = Math.floor((y / displaySize) * CELL_SIZE);
+    const col = Math.floor((x / rect.width) * CELL_SIZE);
+    const row = Math.floor((y / rect.height) * CELL_SIZE);
 
     if (row < 0 || row >= CELL_SIZE || col < 0 || col >= CELL_SIZE) {
       return null;

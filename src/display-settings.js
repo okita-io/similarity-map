@@ -21,9 +21,12 @@
  * @property {number} cluster_id
  * @property {number} hue
  * @property {number} member_count
+ * @property {number} instance_count
  * @property {string} most_central_window_text
  * @property {number[]} pages
  */
+
+import { bindSliderNumberInput } from "./slider-input.js";
 
 export class DisplaySettingsPanel {
   /**
@@ -74,7 +77,17 @@ export class DisplaySettingsPanel {
         <div class="display-settings-controls">
           <div class="setting-group">
             <label class="setting-label" for="slider-tolerance">
-              Tolerance: <span class="setting-value" id="value-tolerance">${this._tolerance.toFixed(2)}</span>
+              <span>Tolerance:</span>
+              <input
+                type="number"
+                id="input-tolerance"
+                class="setting-number-input"
+                min="0.75"
+                max="1.00"
+                step="0.01"
+                value="${this._tolerance.toFixed(2)}"
+                aria-label="Tolerance value"
+              />
             </label>
             <input
               type="range"
@@ -90,7 +103,17 @@ export class DisplaySettingsPanel {
 
           <div class="setting-group">
             <label class="setting-label" for="slider-gamma">
-              Gamma: <span class="setting-value" id="value-gamma">${this._gamma.toFixed(1)}</span>
+              <span>Gamma:</span>
+              <input
+                type="number"
+                id="input-gamma"
+                class="setting-number-input"
+                min="0.5"
+                max="3.0"
+                step="0.1"
+                value="${this._gamma.toFixed(1)}"
+                aria-label="Gamma value"
+              />
             </label>
             <input
               type="range"
@@ -117,40 +140,44 @@ export class DisplaySettingsPanel {
     // Cache element references
     this._els = {
       tolerance: this.container.querySelector("#slider-tolerance"),
+      inputTolerance: this.container.querySelector("#input-tolerance"),
       gamma: this.container.querySelector("#slider-gamma"),
-      valueTolerance: this.container.querySelector("#value-tolerance"),
-      valueGamma: this.container.querySelector("#value-gamma"),
+      inputGamma: this.container.querySelector("#input-gamma"),
       clusterFilterList: this.container.querySelector("#cluster-filter-list"),
     };
   }
 
   /** Attach event listeners to slider controls */
   _attachListeners() {
-    // Tolerance slider — frontend-only mask update, no IPC
-    this._els.tolerance.addEventListener("input", () => {
-      const val = Number(this._els.tolerance.value);
-      this._tolerance = val;
-      this._els.valueTolerance.textContent = val.toFixed(2);
+    const commitDisplayRaster = () => {
+      if (this._allPages.length === 0 || !this.jobId) return;
+      void this._rasterPages(this._allPages);
+    };
 
-      // Update tolerance mask (frontend-only, no IPC)
-      if (this.toleranceMask && this.canvases) {
-        this.toleranceMask.updateTolerance(val, this.canvases);
-      }
-
+    const onToleranceCommit = () => {
+      this._tolerance = Number(this._els.tolerance.value);
+      commitDisplayRaster();
       this._schedulePersist();
-    });
+    };
 
-    // Gamma slider — full re-raster via IPC (all pages)
-    this._els.gamma.addEventListener("input", () => {
-      const val = Number(this._els.gamma.value);
-      this._gamma = val;
-      this._els.valueGamma.textContent = val.toFixed(1);
+    bindSliderNumberInput(this._els.tolerance, this._els.inputTolerance, {
+      format: (n) => n.toFixed(2),
+      onChange: onToleranceCommit,
     });
+    this._els.tolerance.addEventListener("change", onToleranceCommit);
 
-    this._els.gamma.addEventListener("change", () => {
-      this._onGammaChange();
+    const onGammaCommit = () => {
+      this._gamma = Number(this._els.gamma.value);
+      this._els.inputGamma.value = this._gamma.toFixed(1);
+      commitDisplayRaster();
       this._schedulePersist();
+    };
+
+    bindSliderNumberInput(this._els.gamma, this._els.inputGamma, {
+      format: (n) => n.toFixed(1),
+      onChange: onGammaCommit,
     });
+    this._els.gamma.addEventListener("change", onGammaCommit);
   }
 
   /**
@@ -160,6 +187,25 @@ export class DisplaySettingsPanel {
   setClusters(clusters) {
     this._clusters = clusters;
     this._renderClusterToggles();
+  }
+
+  /**
+   * @param {ClusterInfo} cluster
+   * @returns {number}
+   */
+  _clusterPageCount(cluster) {
+    return cluster.pages?.length ?? 0;
+  }
+
+  /**
+   * Compact stats label: windows · pages.
+   * @param {ClusterInfo} cluster
+   * @returns {string}
+   */
+  _clusterStatsLabel(cluster) {
+    const pages = this._clusterPageCount(cluster);
+    const instances = cluster.instance_count ?? cluster.member_count;
+    return `(${instances} inst · ${pages} pg)`;
   }
 
   /**
@@ -186,10 +232,13 @@ export class DisplaySettingsPanel {
    */
   _clusterListTitle(cluster) {
     const text = (cluster.most_central_window_text || "").trim();
+    const pages = this._clusterPageCount(cluster);
+    const instances = cluster.instance_count ?? cluster.member_count;
+    const stats = `${instances} instances · ${pages} pages · ${cluster.member_count} windows`;
     if (!text) {
-      return `Cluster ${cluster.cluster_id} (${cluster.member_count} windows)`;
+      return `Cluster ${cluster.cluster_id} (${stats})`;
     }
-    return `Cluster ${cluster.cluster_id} (${cluster.member_count} windows)\n${text}`;
+    return `Cluster ${cluster.cluster_id} (${stats})\n${text}`;
   }
 
   /** Render cluster toggle checkboxes */
@@ -236,7 +285,8 @@ export class DisplaySettingsPanel {
 
       const count = document.createElement("span");
       count.className = "cluster-toggle-count";
-      count.textContent = `(${cluster.member_count})`;
+      count.textContent = this._clusterStatsLabel(cluster);
+      count.title = `${cluster.instance_count ?? cluster.member_count} merged instances · ${this._clusterPageCount(cluster)} pages · ${cluster.member_count} windows`;
 
       checkbox.addEventListener("change", () => {
         this._onClusterToggle(cluster.cluster_id, checkbox.checked);
@@ -280,14 +330,14 @@ export class DisplaySettingsPanel {
     this._schedulePersist();
   }
 
-  /** Handle gamma change — full re-raster via IPC (all pages) */
-  async _onGammaChange() {
+  /** Handle gamma or tolerance commit — full re-raster via IPC (all pages) */
+  async _commitAllPagesRaster() {
     if (this._allPages.length === 0) return;
     await this._rasterPages(this._allPages);
   }
 
   /**
-   * Call raster_pages IPC command.
+   * Call raster_pages IPC command and refresh canvases.
    * @param {number[]} pages - Pages to re-raster
    */
   async _rasterPages(pages) {
@@ -308,9 +358,15 @@ export class DisplaySettingsPanel {
         hiddenClusters: Array.from(this._hiddenClusters),
       });
 
-      // Notify caller that pages were updated
       if (this.onPagesUpdated) {
-        this.onPagesUpdated(result);
+        await this.onPagesUpdated(result);
+      } else if (window.gridRenderer) {
+        for (const pageCanvas of result) {
+          await window.gridRenderer.updatePage(
+            pageCanvas.page,
+            pageCanvas.canvas_rgba_b64,
+          );
+        }
       }
     } catch (err) {
       console.error("raster_pages failed:", err);
@@ -372,13 +428,13 @@ export class DisplaySettingsPanel {
     if (state.tolerance !== undefined) {
       this._tolerance = state.tolerance;
       this._els.tolerance.value = state.tolerance;
-      this._els.valueTolerance.textContent = state.tolerance.toFixed(2);
+      this._els.inputTolerance.value = state.tolerance.toFixed(2);
     }
 
     if (state.gamma !== undefined) {
       this._gamma = state.gamma;
       this._els.gamma.value = state.gamma;
-      this._els.valueGamma.textContent = state.gamma.toFixed(1);
+      this._els.inputGamma.value = state.gamma.toFixed(1);
     }
 
     if (state.hidden_clusters && Array.isArray(state.hidden_clusters)) {

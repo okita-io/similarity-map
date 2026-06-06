@@ -8,7 +8,6 @@ use crate::importer;
 use crate::model;
 use crate::ort_runtime;
 use crate::pipeline::{self, PipelineConfig};
-use crate::rasterizer;
 use crate::types::*;
 use crate::windowing;
 
@@ -141,17 +140,11 @@ pub async fn restore_session(
     app_handle: tauri::AppHandle,
     job_id: String,
 ) -> Result<RestoreHandle, AppError> {
-    use crate::centroid::{build_cluster_registry, WindowData};
     use crate::display_state::load_display_state;
     use crate::events;
+    use crate::job_data::load_job_render_data;
     use crate::rasterizer::{encode_canvas_base64, rasterize_page};
-    use crate::subcell::{build_page_sub_grids, WindowSubCellData};
 
-    use arrow_array::{
-        Array, FixedSizeListArray, Float32Array, Int32Array, StringArray, UInt32Array,
-    };
-
-    // ─── Step 1: Open storage ────────────────────────────────────────────
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -173,164 +166,20 @@ pub async fn restore_session(
         })
     })?;
 
-    // ─── Step 2: Load window data for the job ────────────────────────────
-    let window_batches = store.get_windows_for_job(&job_id).await.map_err(|e| {
+    let render_data = load_job_render_data(&store, &job_id).await.map_err(|e| {
         AppError::Storage(crate::types::StorageError {
-            message: format!("Failed to load windows: {}", e),
+            message: format!("Failed to load job render data: {}", e),
         })
     })?;
 
-    // Parse window records from RecordBatches
-    let mut window_data_list: Vec<WindowData> = Vec::new();
-    let mut subcell_data_list: Vec<WindowSubCellData> = Vec::new();
+    let page_sub_grids = render_data.page_sub_grids;
+    let page_count = render_data.page_count;
 
-    for batch in &window_batches {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-
-        let window_ids = batch
-            .column_by_name("window_id")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let window_indices = batch
-            .column_by_name("window_index")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let pages_col = batch
-            .column_by_name("page")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let char_starts = batch
-            .column_by_name("char_start")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let char_ends = batch
-            .column_by_name("char_end")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let texts = batch
-            .column_by_name("text")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let cluster_ids = batch
-            .column_by_name("cluster_id")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap();
-        let sims = batch
-            .column_by_name("sim_to_centroid")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<Float32Array>()
-            .unwrap();
-        let embeddings_col = batch
-            .column_by_name("embedding")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<FixedSizeListArray>()
-            .unwrap();
-
-        for i in 0..batch.num_rows() {
-            let window_id = window_ids.value(i).to_string();
-            let window_index = window_indices.value(i);
-            let page = pages_col.value(i);
-            let char_start = char_starts.value(i);
-            let char_end = char_ends.value(i);
-            let text = texts.value(i).to_string();
-            let cluster_id = cluster_ids.value(i);
-            let sim_to_centroid = sims.value(i);
-
-            let embedding = embeddings_col
-                .value(i)
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .unwrap()
-                .values()
-                .to_vec();
-
-            window_data_list.push(WindowData {
-                window_id: window_id.clone(),
-                window_index,
-                page,
-                cluster_id,
-                embedding,
-                text: text.clone(),
-            });
-
-            subcell_data_list.push(WindowSubCellData {
-                window_id,
-                page,
-                char_start,
-                char_end,
-                cluster_id,
-                sim_to_centroid,
-            });
-        }
-    }
-
-    // ─── Step 3: Load page data to get char counts ───────────────────────
-    let page_batches = store.get_pages_for_job(&job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
-            message: format!("Failed to load pages: {}", e),
-        })
-    })?;
-
-    let mut page_char_counts: std::collections::HashMap<u32, u32> =
-        std::collections::HashMap::new();
-    let mut page_count: u32 = 0;
-
-    for batch in &page_batches {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-        let page_nums = batch
-            .column_by_name("page")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let char_counts = batch
-            .column_by_name("char_count")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-
-        for i in 0..batch.num_rows() {
-            let page_num = page_nums.value(i);
-            let char_count = char_counts.value(i);
-            page_char_counts.insert(page_num, char_count);
-            page_count += 1;
-        }
-    }
-
-    // ─── Step 4: Build cluster registry ──────────────────────────────────
-    let _cluster_registry = build_cluster_registry(&window_data_list);
-
-    // ─── Step 5: Build PageSubGrids ──────────────────────────────────────
-    let page_sub_grids = build_page_sub_grids(&subcell_data_list, &page_char_counts);
-
-    // ─── Step 6: Load display state ──────────────────────────────────────
     let display_state = load_display_state(&app_data_dir, &job_id);
     let threshold = display_state.tolerance;
     let gamma = display_state.gamma;
-    let hidden: HashSet<i32> = display_state.hidden_clusters.into_iter().collect();
+    let hidden: HashSet<i32> = display_state.hidden_clusters.iter().copied().collect();
 
-    // ─── Step 7: Rasterize pages and stream events ───────────────────────
     let total_pages = page_sub_grids.len();
 
     for (idx, grid) in page_sub_grids.iter().enumerate() {
@@ -384,6 +233,7 @@ pub async fn restore_session(
     Ok(RestoreHandle {
         job_id,
         page_count,
+        display_state,
     })
 }
 
@@ -592,6 +442,8 @@ pub async fn analyze_document(
     chapter_break_regex: Option<String>,
     min_repetitions: u32,
     min_samples: u32,
+    enable_hdbscan: Option<bool>,
+    link_subphrases: Option<bool>,
 ) -> Result<AnalysisHandle, AppError> {
     crate::log_info!(
         app_handle,
@@ -609,6 +461,8 @@ pub async fn analyze_document(
         chapter_break_regex,
         min_repetitions,
         min_samples,
+        enable_hdbscan: enable_hdbscan.unwrap_or(true),
+        link_subphrases: link_subphrases.unwrap_or(false),
     };
 
     let app_for_log = app_handle.clone();
@@ -721,24 +575,57 @@ pub async fn resume_analysis(
 /// Targeted re-raster for cluster filter or gamma changes.
 #[tauri::command]
 pub async fn raster_pages(
+    app_handle: tauri::AppHandle,
     job_id: String,
     pages: Vec<u32>,
     threshold: f32,
     gamma: f32,
     hidden_clusters: Vec<i32>,
-) -> Result<Vec<PageCanvas>, AppError> {
-    // TODO: Retrieve stored PageSubGrid data from LanceDB for the given job_id.
-    // Once the full storage retrieval pipeline is wired, this will:
-    // 1. Load window data for the job from LanceDB
-    // 2. Build PageSubGrids from the window data
-    // For now, this placeholder will be replaced when the pipeline is complete.
-    let _job_id = job_id;
-    let all_grids: Vec<PageSubGrid> = todo!("Load PageSubGrids from storage for job");
+) -> Result<Vec<PageRasterPayload>, AppError> {
+    use crate::job_data::load_job_render_data;
+    use crate::rasterizer::{encode_canvas_base64, rasterize_selected_pages};
+    use crate::storage::Storage;
 
-    // Core rasterization logic: filter to requested pages and rasterize
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    let render_data = load_job_render_data(&store, &job_id).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to load job render data: {}", e),
+        })
+    })?;
+
     let hidden: HashSet<i32> = hidden_clusters.into_iter().collect();
-    let canvases = rasterizer::rasterize_selected_pages(&all_grids, &pages, gamma, threshold, &hidden);
-    Ok(canvases)
+    let canvases = rasterize_selected_pages(
+        &render_data.page_sub_grids,
+        &pages,
+        gamma,
+        threshold,
+        &hidden,
+    );
+
+    Ok(canvases
+        .into_iter()
+        .map(|canvas| PageRasterPayload {
+            page: canvas.page,
+            canvas_rgba_b64: encode_canvas_base64(&canvas),
+        })
+        .collect())
 }
 
 /// Returns detail data for a specific sub-cell click.
@@ -760,10 +647,9 @@ pub async fn get_cluster_registry(
     app_handle: tauri::AppHandle,
     job_id: String,
 ) -> Result<ClusterRegistry, AppError> {
-    use crate::centroid::{build_cluster_registry, WindowData};
+    use crate::centroid::build_cluster_registry;
+    use crate::job_data::parse_window_data_from_batches;
     use crate::storage::Storage;
-
-    use arrow_array::{Array, FixedSizeListArray, Float32Array, Int32Array, StringArray, UInt32Array};
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppError::Storage(crate::types::StorageError {
@@ -779,7 +665,7 @@ pub async fn get_cluster_registry(
     })?;
     store.ensure_tables().await.map_err(|e| {
         AppError::Storage(crate::types::StorageError {
-            message: format!("Failed to open storage: {}", e),
+            message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
@@ -789,70 +675,7 @@ pub async fn get_cluster_registry(
         })
     })?;
 
-    let mut window_data_list: Vec<WindowData> = Vec::new();
-
-    for batch in &window_batches {
-        if batch.num_rows() == 0 {
-            continue;
-        }
-
-        let window_ids = batch
-            .column_by_name("window_id")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let window_indices = batch
-            .column_by_name("window_index")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let pages_col = batch
-            .column_by_name("page")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .unwrap();
-        let texts = batch
-            .column_by_name("text")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let cluster_ids = batch
-            .column_by_name("cluster_id")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap();
-        let embeddings_col = batch
-            .column_by_name("embedding")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<FixedSizeListArray>()
-            .unwrap();
-
-        for i in 0..batch.num_rows() {
-            let embedding = embeddings_col
-                .value(i)
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .unwrap()
-                .values()
-                .to_vec();
-
-            window_data_list.push(WindowData {
-                window_id: window_ids.value(i).to_string(),
-                window_index: window_indices.value(i),
-                page: pages_col.value(i),
-                cluster_id: cluster_ids.value(i),
-                embedding,
-                text: texts.value(i).to_string(),
-            });
-        }
-    }
-
+    let window_data_list = parse_window_data_from_batches(&window_batches);
     Ok(build_cluster_registry(&window_data_list))
 }
 
@@ -872,4 +695,225 @@ pub async fn save_display_state(
         })?;
 
     crate::display_state::save_display_state(&app_data_dir, &state)
+}
+
+// === Saved Results Management ===
+
+async fn load_synced_results_catalog(
+    app_handle: &tauri::AppHandle,
+    document_path: &str,
+) -> Result<crate::results_catalog::DocumentResultsCatalog, AppError> {
+    use crate::hash::compute_document_hash;
+    use crate::results_catalog::{load_catalog, save_catalog, sync_catalog_with_jobs};
+    use crate::storage::Storage;
+    use std::collections::{HashMap, HashSet};
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    let batches = store.get_jobs_for_document(document_path).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to query jobs: {}", e),
+        })
+    })?;
+    let jobs = Storage::parse_job_records(&batches);
+
+    let current_hash = compute_document_hash(std::path::Path::new(document_path)).ok();
+    let valid_job_ids: HashSet<String> = jobs
+        .iter()
+        .filter(|job| job.status == "complete")
+        .filter(|job| match &current_hash {
+            Some(hash) => job.document_hash == *hash,
+            None => true,
+        })
+        .map(|job| job.job_id.clone())
+        .collect();
+
+    let mut page_counts = HashMap::new();
+    for job_id in &valid_job_ids {
+        if let Ok(page_batches) = store.get_pages_for_job(job_id).await {
+            let count = page_batches.iter().map(|batch| batch.num_rows() as u32).sum();
+            page_counts.insert(job_id.clone(), count);
+        }
+    }
+
+    let mut catalog = load_catalog(&app_data_dir, document_path);
+    catalog.document_path = document_path.to_string();
+    sync_catalog_with_jobs(&mut catalog, &jobs, &page_counts, &valid_job_ids);
+    save_catalog(&app_data_dir, &catalog)?;
+
+    Ok(catalog)
+}
+
+/// List saved analysis results for a document, syncing any completed jobs from storage.
+#[tauri::command]
+pub async fn list_document_results(
+    app_handle: tauri::AppHandle,
+    path: String,
+) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
+    let catalog = load_synced_results_catalog(&app_handle, &path).await?;
+    Ok(crate::results_catalog::to_list(&catalog))
+}
+
+/// Rename a saved result entry.
+#[tauri::command]
+pub async fn save_document_result(
+    app_handle: tauri::AppHandle,
+    path: String,
+    result_id: String,
+    name: String,
+) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
+    use crate::results_catalog::{load_catalog, rename_result, save_catalog, to_list};
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let mut catalog = load_catalog(&app_data_dir, &path);
+    rename_result(&mut catalog, &result_id, &name)?;
+    save_catalog(&app_data_dir, &catalog)?;
+    Ok(to_list(&catalog))
+}
+
+/// Save the current analysis under a new result name.
+#[tauri::command]
+pub async fn save_document_result_as(
+    app_handle: tauri::AppHandle,
+    path: String,
+    job_id: String,
+    name: String,
+) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
+    use crate::results_catalog::{add_result_alias, load_catalog, save_catalog, set_active_result, to_list};
+    use crate::storage::Storage;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    let job = store.get_job_by_id(&job_id).await.map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to load job: {}", e),
+        })
+    })?;
+    let job = job.ok_or_else(|| AppError::Session(crate::types::SessionError {
+        message: format!("Job not found: {job_id}"),
+    }))?;
+
+    if job.status != "complete" {
+        return Err(AppError::Session(crate::types::SessionError {
+            message: "Only completed analyses can be saved as results".to_string(),
+        }));
+    }
+
+    let page_count = store
+        .get_pages_for_job(&job_id)
+        .await
+        .map_err(|e| AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to load pages: {}", e),
+        }))?
+        .iter()
+        .map(|batch| batch.num_rows() as u32)
+        .sum();
+
+    let mut catalog = load_catalog(&app_data_dir, &path);
+    let entry = add_result_alias(&mut catalog, &job, page_count, &name)?;
+    set_active_result(&mut catalog, &entry.result_id)?;
+    save_catalog(&app_data_dir, &catalog)?;
+    Ok(to_list(&catalog))
+}
+
+/// Delete a saved result and discard its job data when no aliases remain.
+#[tauri::command]
+pub async fn delete_document_result(
+    app_handle: tauri::AppHandle,
+    path: String,
+    result_id: String,
+) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
+    use crate::display_state;
+    use crate::results_catalog::{load_catalog, remove_result, save_catalog, to_list};
+    use crate::storage::Storage;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let mut catalog = load_catalog(&app_data_dir, &path);
+    let discard_job_id = remove_result(&mut catalog, &result_id)?;
+    save_catalog(&app_data_dir, &catalog)?;
+
+    if let Some(job_id) = discard_job_id {
+        let db_path = app_data_dir.join("similarity_map_db");
+        let store = Storage::open(&db_path).await.map_err(|e| {
+            AppError::Storage(crate::types::StorageError {
+                message: format!("Failed to open storage: {}", e),
+            })
+        })?;
+        store.ensure_tables().await.map_err(|e| {
+            AppError::Storage(crate::types::StorageError {
+                message: format!("Failed to ensure tables: {}", e),
+            })
+        })?;
+        store.delete_job_data(&job_id).await.map_err(|e| {
+            AppError::Storage(crate::types::StorageError {
+                message: format!("Failed to delete job data: {}", e),
+            })
+        })?;
+        display_state::delete_display_state(&app_data_dir, &job_id)?;
+    }
+
+    Ok(to_list(&catalog))
+}
+
+/// Mark a saved result as active in the catalog (does not load it).
+#[tauri::command]
+pub async fn set_active_document_result(
+    app_handle: tauri::AppHandle,
+    path: String,
+    result_id: String,
+) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
+    use crate::results_catalog::{load_catalog, save_catalog, set_active_result, to_list};
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(crate::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let mut catalog = load_catalog(&app_data_dir, &path);
+    set_active_result(&mut catalog, &result_id)?;
+    save_catalog(&app_data_dir, &catalog)?;
+    Ok(to_list(&catalog))
 }
