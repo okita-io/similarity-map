@@ -4,6 +4,7 @@ pub mod cancellation;
 pub mod centroid;
 pub mod clustering;
 pub mod color;
+pub mod contract;
 pub mod embedding;
 pub mod hash;
 pub mod importer;
@@ -28,6 +29,13 @@ pub use visualization::{
     VisualizationPayload, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
 };
 
+pub use contract::{
+    build_analysis_output, build_scope_manifest, format_segment_id, from_export_json,
+    merge_pass_reports, repetition_report_to_v1, to_export_json, validate_analysis_output,
+    ActSegment, AnalysisOutput, AnalysisPassRecord, AnalysisScope, ClusterSummaryV1,
+    ContractError, EditSpanV1, ParagraphIndexEntry, RepetitionReportV1, ScopeManifest,
+    SpanLocation, SuggestedOp, SCHEMA_VERSION,
+};
 pub use report::{
     build_repetition_report, build_repetition_report_from_registry,
     load_repetition_report_from_storage, pages_to_document_text, AnalysisStats, ClusterSummary,

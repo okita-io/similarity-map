@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://okita.io/schemas/similarity-map/analysis_output_v1.schema.json",
+  "title": "AnalysisOutput",
+  "description": "RepetitionReport v1 pipeline envelope for Similarity Map × Romance Factory integration.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "scope",
+    "scope_manifest",
+    "passes",
+    "merged_repetition_report"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "scope": { "$ref": "#/$defs/AnalysisScope" },
+    "scope_manifest": { "$ref": "#/$defs/ScopeManifest" },
+    "passes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/AnalysisPassRecord" }
+    },
+    "merged_repetition_report": { "$ref": "#/$defs/RepetitionReportV1" }
+  },
+  "$defs": {
+    "AnalysisScope": {
+      "type": "object",
+      "required": [
+        "chapter",
+        "scope_char_start",
+        "scope_char_end",
+        "doc_char_start",
+        "doc_char_end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "chapter": { "type": "integer", "minimum": 1 },
+        "act": { "type": "integer", "minimum": 1 },
+        "document_path": { "type": "string" },
+        "document_hash": { "type": "string" },
+        "scope_char_start": { "type": "integer", "minimum": 0 },
+        "scope_char_end": { "type": "integer", "minimum": 0 },
+        "doc_char_start": { "type": "integer", "minimum": 0 },
+        "doc_char_end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ScopeManifest": {
+      "type": "object",
+      "required": ["chapter", "acts"],
+      "additionalProperties": false,
+      "properties": {
+        "chapter": { "type": "integer", "minimum": 1 },
+        "acts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActSegment" }
+        }
+      }
+    },
+    "ActSegment": {
+      "type": "object",
+      "required": [
+        "act",
+        "scope_char_start",
+        "scope_char_end",
+        "doc_char_start",
+        "doc_char_end",
+        "paragraphs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "act": { "type": "integer", "minimum": 1 },
+        "scope_char_start": { "type": "integer", "minimum": 0 },
+        "scope_char_end": { "type": "integer", "minimum": 0 },
+        "doc_char_start": { "type": "integer", "minimum": 0 },
+        "doc_char_end": { "type": "integer", "minimum": 0 },
+        "paragraphs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ParagraphIndexEntry" }
+        }
+      }
+    },
+    "ParagraphIndexEntry": {
+      "type": "object",
+      "required": [
+        "paragraph_index",
+        "segment_id",
+        "scope_char_start",
+        "scope_char_end",
+        "doc_char_start",
+        "doc_char_end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "paragraph_index": { "type": "integer", "minimum": 1 },
+        "segment_id": {
+          "type": "string",
+          "pattern": "^ch[0-9]{2}_a[0-9]{2}_p[0-9]{2}$"
+        },
+        "scope_char_start": { "type": "integer", "minimum": 0 },
+        "scope_char_end": { "type": "integer", "minimum": 0 },
+        "doc_char_start": { "type": "integer", "minimum": 0 },
+        "doc_char_end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SpanLocation": {
+      "type": "object",
+      "required": [
+        "chapter",
+        "act",
+        "paragraph_index",
+        "segment_id",
+        "sentence_index",
+        "scope_char_start",
+        "scope_char_end",
+        "doc_char_start",
+        "doc_char_end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "chapter": { "type": "integer", "minimum": 1 },
+        "act": { "type": "integer", "minimum": 1 },
+        "paragraph_index": { "type": "integer", "minimum": 1 },
+        "segment_id": {
+          "type": "string",
+          "pattern": "^ch[0-9]{2}_a[0-9]{2}_p[0-9]{2}$"
+        },
+        "sentence_index": { "type": "integer", "minimum": 1 },
+        "scope_char_start": { "type": "integer", "minimum": 0 },
+        "scope_char_end": { "type": "integer", "minimum": 0 },
+        "doc_char_start": { "type": "integer", "minimum": 0 },
+        "doc_char_end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SuggestedOp": {
+      "type": "string",
+      "enum": ["keep", "rewrite", "remove", "bridge"]
+    },
+    "EditSpanV1": {
+      "type": "object",
+      "required": [
+        "location",
+        "cluster_id",
+        "instance_id",
+        "text",
+        "similarity_to_centroid",
+        "member_window_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "location": { "$ref": "#/$defs/SpanLocation" },
+        "cluster_id": { "type": "integer" },
+        "instance_id": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string" },
+        "similarity_to_centroid": { "type": "number" },
+        "member_window_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ClusterSummaryV1": {
+      "type": "object",
+      "required": [
+        "cluster_id",
+        "representative_text",
+        "instance_count",
+        "total_word_estimate",
+        "canonical",
+        "duplicates",
+        "spans",
+        "suggested_op",
+        "cross_act",
+        "needs_bridge"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cluster_id": { "type": "integer" },
+        "representative_text": { "type": "string" },
+        "instance_count": { "type": "integer", "minimum": 1 },
+        "total_word_estimate": { "type": "integer", "minimum": 0 },
+        "canonical": { "$ref": "#/$defs/EditSpanV1" },
+        "duplicates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EditSpanV1" }
+        },
+        "spans": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EditSpanV1" }
+        },
+        "suggested_op": { "$ref": "#/$defs/SuggestedOp" },
+        "cross_act": { "type": "boolean" },
+        "needs_bridge": { "type": "boolean" }
+      }
+    },
+    "AnalysisStats": {
+      "type": "object",
+      "required": [
+        "cluster_count",
+        "total_duplicate_instances",
+        "total_duplicate_words_estimate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cluster_count": { "type": "integer", "minimum": 0 },
+        "total_duplicate_instances": { "type": "integer", "minimum": 0 },
+        "total_duplicate_words_estimate": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "RepetitionReportV1": {
+      "type": "object",
+      "required": ["job_id", "clusters", "stats"],
+      "additionalProperties": false,
+      "properties": {
+        "job_id": { "type": "string" },
+        "clusters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ClusterSummaryV1" }
+        },
+        "stats": { "$ref": "#/$defs/AnalysisStats" }
+      }
+    },
+    "AnalysisPassRecord": {
+      "type": "object",
+      "required": [
+        "pass_id",
+        "pass_label",
+        "scope",
+        "window_size",
+        "stride",
+        "repetition_report"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pass_id": { "type": "string" },
+        "pass_label": { "type": "string" },
+        "scope": { "$ref": "#/$defs/AnalysisScope" },
+        "window_size": { "type": "integer", "minimum": 5 },
+        "stride": { "type": "integer", "minimum": 1 },
+        "tokens_per_page": { "type": "integer", "minimum": 200 },
+        "repetition_report": { "$ref": "#/$defs/RepetitionReportV1" }
+      }
+    }
+  }
+}

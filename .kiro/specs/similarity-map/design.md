@@ -12,6 +12,10 @@ Key design goals:
 - Session persistence — completed analyses restore instantly from LanceDB
 - Interactive exploration — display settings update without re-running the pipeline
 
+### Romance Factory integration contract
+
+Pipeline-consumable JSON export is defined in **[integration-contract.md](./integration-contract.md)** (RepetitionReport v1). Rust serde types live in `similarity-core/src/contract.rs`; JSON Schema at `similarity-core/schemas/analysis_output_v1.schema.json`; example fixture at `similarity-core/fixtures/analysis_output_v1.example.json`.
+
 ## Architecture
 
 ### System Architecture Diagram
