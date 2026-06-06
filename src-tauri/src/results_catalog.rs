@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::storage::JobRecord;
-use crate::types::{AppError, SessionError};
+use similarity_core::storage::JobRecord;
+use similarity_core::types::{AppError, SessionError};
 
 /// A named saved analysis result for a document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,7 +176,7 @@ pub fn rename_result(
 ) -> Result<(), AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation(crate::types::ValidationError {
+        return Err(AppError::Validation(similarity_core::types::ValidationError {
             message: "Result name cannot be empty".to_string(),
             field: "name".to_string(),
         }));
@@ -187,7 +187,7 @@ pub fn rename_result(
         .iter()
         .any(|entry| entry.name == trimmed && entry.result_id != result_id)
     {
-        return Err(AppError::Validation(crate::types::ValidationError {
+        return Err(AppError::Validation(similarity_core::types::ValidationError {
             message: format!("A result named \"{trimmed}\" already exists"),
             field: "name".to_string(),
         }));
@@ -214,14 +214,14 @@ pub fn add_result_alias(
 ) -> Result<SavedResultEntry, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation(crate::types::ValidationError {
+        return Err(AppError::Validation(similarity_core::types::ValidationError {
             message: "Result name cannot be empty".to_string(),
             field: "name".to_string(),
         }));
     }
 
     if catalog.results.iter().any(|entry| entry.name == trimmed) {
-        return Err(AppError::Validation(crate::types::ValidationError {
+        return Err(AppError::Validation(similarity_core::types::ValidationError {
             message: format!("A result named \"{trimmed}\" already exists"),
             field: "name".to_string(),
         }));

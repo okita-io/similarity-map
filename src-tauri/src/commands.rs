@@ -2,14 +2,14 @@ use tauri::{Emitter, Manager};
 
 use std::collections::HashSet;
 
-use crate::benchmark;
-use crate::cancellation;
-use crate::importer;
-use crate::model;
-use crate::ort_runtime;
+use similarity_core::benchmark;
+use similarity_core::cancellation;
+use similarity_core::importer;
+use similarity_core::model;
+use similarity_core::ort_runtime;
 use crate::pipeline::{self, PipelineConfig};
-use crate::types::*;
-use crate::windowing;
+use similarity_core::types::*;
+use similarity_core::windowing;
 
 // === Session Management ===
 
@@ -19,33 +19,33 @@ pub async fn check_document_session(
     app_handle: tauri::AppHandle,
     path: String,
 ) -> Result<DocumentSessionState, AppError> {
-    use crate::hash::compute_document_hash;
-    use crate::storage::Storage;
+    use similarity_core::hash::compute_document_hash;
+    use similarity_core::storage::Storage;
 
     // 1. Open storage
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     // 2. Query jobs for this document path
     let batches = store.get_jobs_for_document(&path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to query jobs: {}", e),
         })
     })?;
@@ -142,32 +142,32 @@ pub async fn restore_session(
 ) -> Result<RestoreHandle, AppError> {
     use crate::display_state::load_display_state;
     use crate::events;
-    use crate::job_data::load_job_render_data;
+    use similarity_core::job_data::load_job_render_data;
     use crate::rasterizer::{encode_canvas_base64, rasterize_page};
 
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
-    let store = crate::storage::Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+    let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     let render_data = load_job_render_data(&store, &job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to load job render data: {}", e),
         })
     })?;
@@ -241,14 +241,14 @@ pub async fn restore_session(
 #[tauri::command]
 pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result<(), AppError> {
     use crate::display_state;
-    use crate::storage::Storage;
+    use similarity_core::storage::Storage;
 
     // 1. Resolve app data directory
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
@@ -256,18 +256,18 @@ pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result
     // 2. Open storage and delete windows, pages, and job record
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     store.delete_job_data(&job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to delete job data: {}", e),
         })
     })?;
@@ -380,7 +380,7 @@ pub async fn estimate_analysis(
         importer::import_pdf(file_path)?
     } else {
         let text = std::fs::read_to_string(file_path).map_err(|e| {
-            AppError::Import(crate::types::ImportError {
+            AppError::Import(similarity_core::types::ImportError {
                 message: format!("Failed to read file: {}", e),
                 path: Some(path.clone()),
             })
@@ -499,14 +499,14 @@ pub async fn cancel_analysis(app_handle: tauri::AppHandle, job_id: String) -> Re
             .path()
             .app_data_dir()
             .map_err(|e| {
-                AppError::Storage(crate::types::StorageError {
+                AppError::Storage(similarity_core::types::StorageError {
                     message: format!("Failed to resolve app data directory: {}", e),
                 })
             })?;
 
         let db_path = app_data_dir.join("similarity_map_db");
-        let store = crate::storage::Storage::open(&db_path).await.map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+        let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to open storage: {}", e),
             })
         })?;
@@ -536,14 +536,14 @@ pub async fn cancel_analysis(app_handle: tauri::AppHandle, job_id: String) -> Re
         .path()
         .app_data_dir()
         .map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
-    let store = crate::storage::Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+    let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
@@ -582,30 +582,30 @@ pub async fn raster_pages(
     gamma: f32,
     hidden_clusters: Vec<i32>,
 ) -> Result<Vec<PageRasterPayload>, AppError> {
-    use crate::job_data::load_job_render_data;
+    use similarity_core::job_data::load_job_render_data;
     use crate::rasterizer::{encode_canvas_base64, rasterize_selected_pages};
-    use crate::storage::Storage;
+    use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     let render_data = load_job_render_data(&store, &job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to load job render data: {}", e),
         })
     })?;
@@ -647,36 +647,209 @@ pub async fn get_cluster_registry(
     app_handle: tauri::AppHandle,
     job_id: String,
 ) -> Result<ClusterRegistry, AppError> {
-    use crate::centroid::build_cluster_registry;
-    use crate::job_data::parse_window_data_from_batches;
-    use crate::storage::Storage;
+    use similarity_core::centroid::build_cluster_registry;
+    use similarity_core::job_data::parse_window_data_from_batches;
+    use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     let window_batches = store.get_windows_for_job(&job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to load windows: {}", e),
         })
     })?;
 
     let window_data_list = parse_window_data_from_batches(&window_batches);
     Ok(build_cluster_registry(&window_data_list))
+}
+
+/// Returns an editorial repetition report with merged spans for Romance Factory.
+#[tauri::command]
+pub async fn get_repetition_report(
+    app_handle: tauri::AppHandle,
+    job_id: String,
+    expand_to_sentences: Option<bool>,
+) -> Result<similarity_core::RepetitionReport, AppError> {
+    use similarity_core::load_repetition_report_from_storage;
+    use similarity_core::storage::Storage;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    load_repetition_report_from_storage(&store, &job_id, expand_to_sentences.unwrap_or(true)).await
+}
+
+/// Returns the full visualization payload: grid data, text highlights, and editorial report.
+#[tauri::command]
+pub async fn get_visualization_payload(
+    app_handle: tauri::AppHandle,
+    job_id: String,
+    tolerance: Option<f32>,
+    gamma: Option<f32>,
+    expand_to_sentences: Option<bool>,
+) -> Result<similarity_core::VisualizationPayload, AppError> {
+    use similarity_core::load_visualization_payload;
+    use similarity_core::storage::Storage;
+    use similarity_core::{DEFAULT_GAMMA, DEFAULT_TOLERANCE};
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    load_visualization_payload(
+        &store,
+        &job_id,
+        tolerance.unwrap_or(DEFAULT_TOLERANCE),
+        gamma.unwrap_or(DEFAULT_GAMMA),
+        expand_to_sentences.unwrap_or(true),
+    )
+    .await
+}
+
+/// Analyze pasted plain text (e.g. Romance Factory output) and return visualization JSON.
+#[tauri::command]
+pub async fn analyze_text(
+    app_handle: tauri::AppHandle,
+    text: String,
+    label: Option<String>,
+    window_size: u32,
+    stride: u32,
+    tokens_per_page: Option<u32>,
+    chapter_break_regex: Option<String>,
+    min_repetitions: u32,
+    min_samples: u32,
+    enable_hdbscan: Option<bool>,
+    link_subphrases: Option<bool>,
+) -> Result<similarity_core::VisualizationPayload, AppError> {
+    use similarity_core::load_visualization_payload;
+    use similarity_core::storage::Storage;
+    use similarity_core::{DEFAULT_GAMMA, DEFAULT_TOLERANCE};
+    use std::io::Write;
+
+    let params = similarity_core::AnalysisParams {
+        window_size,
+        stride,
+        tokens_per_page,
+        chapter_break_regex: chapter_break_regex.clone(),
+        min_repetitions,
+        min_samples,
+        enable_hdbscan: enable_hdbscan.unwrap_or(true),
+        link_subphrases: link_subphrases.unwrap_or(false),
+    };
+    similarity_core::validate_analysis_params(&params, None)?;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let pasted_dir = app_data_dir.join("pasted");
+    std::fs::create_dir_all(&pasted_dir).map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to create pasted text directory: {}", e),
+        })
+    })?;
+
+    let slug = label
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect::<String>()
+        })
+        .unwrap_or_else(|| "paste".to_string());
+    let file_name = format!("{}_{}.md", slug, uuid::Uuid::new_v4());
+    let file_path = pasted_dir.join(&file_name);
+    {
+        let mut file = std::fs::File::create(&file_path).map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to write pasted text: {}", e),
+            })
+        })?;
+        file.write_all(text.as_bytes()).map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to write pasted text: {}", e),
+            })
+        })?;
+    }
+
+    let path_str = file_path.to_string_lossy().to_string();
+    let config = PipelineConfig {
+        path: path_str,
+        window_size,
+        stride,
+        tokens_per_page,
+        chapter_break_regex,
+        min_repetitions,
+        min_samples,
+        enable_hdbscan: enable_hdbscan.unwrap_or(true),
+        link_subphrases: link_subphrases.unwrap_or(false),
+    };
+
+    let handle = pipeline::run_pipeline(config, app_handle.clone()).await?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+
+    load_visualization_payload(
+        &store,
+        &handle.job_id,
+        DEFAULT_TOLERANCE,
+        DEFAULT_GAMMA,
+        true,
+    )
+    .await
 }
 
 /// Persists display state (tolerance, gamma, hidden clusters, zoom, scroll).
@@ -689,7 +862,7 @@ pub async fn save_display_state(
         .path()
         .app_data_dir()
         .map_err(|e| {
-            AppError::Session(crate::types::SessionError {
+            AppError::Session(similarity_core::types::SessionError {
                 message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
@@ -703,31 +876,31 @@ async fn load_synced_results_catalog(
     app_handle: &tauri::AppHandle,
     document_path: &str,
 ) -> Result<crate::results_catalog::DocumentResultsCatalog, AppError> {
-    use crate::hash::compute_document_hash;
+    use similarity_core::hash::compute_document_hash;
     use crate::results_catalog::{load_catalog, save_catalog, sync_catalog_with_jobs};
-    use crate::storage::Storage;
+    use similarity_core::storage::Storage;
     use std::collections::{HashMap, HashSet};
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     let batches = store.get_jobs_for_document(document_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to query jobs: {}", e),
         })
     })?;
@@ -781,7 +954,7 @@ pub async fn save_document_result(
     use crate::results_catalog::{load_catalog, rename_result, save_catalog, to_list};
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
@@ -801,37 +974,37 @@ pub async fn save_document_result_as(
     name: String,
 ) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
     use crate::results_catalog::{add_result_alias, load_catalog, save_catalog, set_active_result, to_list};
-    use crate::storage::Storage;
+    use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
 
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to open storage: {}", e),
         })
     })?;
     store.ensure_tables().await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
         })
     })?;
 
     let job = store.get_job_by_id(&job_id).await.map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to load job: {}", e),
         })
     })?;
-    let job = job.ok_or_else(|| AppError::Session(crate::types::SessionError {
+    let job = job.ok_or_else(|| AppError::Session(similarity_core::types::SessionError {
         message: format!("Job not found: {job_id}"),
     }))?;
 
     if job.status != "complete" {
-        return Err(AppError::Session(crate::types::SessionError {
+        return Err(AppError::Session(similarity_core::types::SessionError {
             message: "Only completed analyses can be saved as results".to_string(),
         }));
     }
@@ -839,7 +1012,7 @@ pub async fn save_document_result_as(
     let page_count = store
         .get_pages_for_job(&job_id)
         .await
-        .map_err(|e| AppError::Storage(crate::types::StorageError {
+        .map_err(|e| AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to load pages: {}", e),
         }))?
         .iter()
@@ -862,10 +1035,10 @@ pub async fn delete_document_result(
 ) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
     use crate::display_state;
     use crate::results_catalog::{load_catalog, remove_result, save_catalog, to_list};
-    use crate::storage::Storage;
+    use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
@@ -877,17 +1050,17 @@ pub async fn delete_document_result(
     if let Some(job_id) = discard_job_id {
         let db_path = app_data_dir.join("similarity_map_db");
         let store = Storage::open(&db_path).await.map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to open storage: {}", e),
             })
         })?;
         store.ensure_tables().await.map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to ensure tables: {}", e),
             })
         })?;
         store.delete_job_data(&job_id).await.map_err(|e| {
-            AppError::Storage(crate::types::StorageError {
+            AppError::Storage(similarity_core::types::StorageError {
                 message: format!("Failed to delete job data: {}", e),
             })
         })?;
@@ -907,7 +1080,7 @@ pub async fn set_active_document_result(
     use crate::results_catalog::{load_catalog, save_catalog, set_active_result, to_list};
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
-        AppError::Storage(crate::types::StorageError {
+        AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;

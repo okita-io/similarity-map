@@ -10,6 +10,7 @@ import { DetailPanel } from "./detail-panel.js";
 import { NavigationController } from "./navigation.js";
 import { ModelDownloadUI } from "./model-download.js";
 import { LogPanel } from "./log-panel.js";
+import { TextPreviewPanel } from "./text-preview.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   // Init log panel first so subsequent module logs are captured.
@@ -86,6 +87,14 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   detailPanel.attachToGrid(container);
 
+  const textPreviewContainer = document.getElementById("text-preview-container");
+  const textPreviewPanel = new TextPreviewPanel(textPreviewContainer, {
+    onHighlightClick: (page, clusterId) => {
+      window.textPreviewPanel?.setActiveCluster(clusterId);
+      navigationController.navigateToPage(page);
+    },
+  });
+
   // Expose globally for other modules and debugging
   window.gridRenderer = gridRenderer;
   window.zoomController = zoomController;
@@ -94,6 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.resultsPanel = resultsPanel;
   window.navigationController = navigationController;
   window.detailPanel = detailPanel;
+  window.textPreviewPanel = textPreviewPanel;
   window.modelDownloadUI = modelDownloadUI;
 
   // Start listening for page-ready events from the backend

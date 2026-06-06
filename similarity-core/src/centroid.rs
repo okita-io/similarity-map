@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::spans::merge_overlapping_spans;
 use crate::types::{ClusterInfo, ClusterRegistry};
 
 /// Input data for centroid computation — one entry per window.
@@ -22,29 +23,7 @@ pub struct WindowData {
 /// Sliding windows from stride < phrase length often overlap; this merges
 /// any spans that share document text into one instance.
 pub fn count_overlapping_instances(spans: &[(u32, u32)]) -> u32 {
-    if spans.is_empty() {
-        return 0;
-    }
-
-    let mut sorted: Vec<(u32, u32)> = spans
-        .iter()
-        .map(|&(start, end)| (start, end.max(start)))
-        .collect();
-    sorted.sort_by_key(|span| span.0);
-
-    let mut instances = 1u32;
-    let mut run_end = sorted[0].1;
-
-    for &(start, end) in sorted.iter().skip(1) {
-        if start >= run_end {
-            instances += 1;
-            run_end = end;
-        } else {
-            run_end = run_end.max(end);
-        }
-    }
-
-    instances
+    merge_overlapping_spans(spans).len() as u32
 }
 
 /// Compute cosine similarity between two vectors.

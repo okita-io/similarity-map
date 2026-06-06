@@ -1,7 +1,9 @@
-// Shared job activation — wires grid, display settings, and backend restore.
+// Shared job activation — wires grid, display settings, text preview, and backend restore.
+
+import { applyVisualizationPayload } from "./text-preview.js";
 
 /**
- * Activate a completed analysis job: re-init grid, restore session, load clusters.
+ * Activate a completed analysis job: re-init grid, restore session, load clusters + text highlights.
  * @param {string} jobId
  * @param {number} pageCount
  * @returns {Promise<void>}
@@ -37,12 +39,23 @@ export async function activateJob(jobId, pageCount) {
   }
 
   try {
-    const registry = await invoke("get_cluster_registry", { jobId });
-    if (display && registry?.clusters) {
-      display.setClusters(Object.values(registry.clusters));
-    }
+    const payload = await invoke("get_visualization_payload", {
+      jobId,
+      tolerance: display?.getTolerance?.() ?? 0.75,
+      gamma: display?.gamma ?? 1.5,
+      expandToSentences: true,
+    });
+    await applyVisualizationPayload(payload);
   } catch (err) {
-    console.warn("get_cluster_registry failed:", err);
+    console.warn("get_visualization_payload failed, falling back to cluster registry:", err);
+    try {
+      const registry = await invoke("get_cluster_registry", { jobId });
+      if (display && registry?.clusters) {
+        display.setClusters(Object.values(registry.clusters));
+      }
+    } catch (registryErr) {
+      console.warn("get_cluster_registry failed:", registryErr);
+    }
   }
 
   const resultsPanel = window.resultsPanel;

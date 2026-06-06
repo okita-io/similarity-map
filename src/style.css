@@ -53,6 +53,136 @@ body {
   padding: 20px;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.text-preview-container {
+  flex: 0 0 auto;
+  max-height: 280px;
+  min-height: 120px;
+}
+
+.text-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  background: var(--surface-secondary, rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.text-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-preview-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.text-preview-body {
+  flex: 1;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  max-height: 180px;
+}
+
+.text-preview-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.legend-canonical::before,
+.legend-duplicate::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.legend-canonical::before {
+  background: rgba(100, 181, 246, 0.35);
+  border: 1px solid rgba(100, 181, 246, 0.8);
+}
+
+.legend-duplicate::before {
+  background: rgba(239, 83, 80, 0.35);
+  border: 1px solid rgba(239, 83, 80, 0.8);
+}
+
+.text-highlight {
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+}
+
+.text-highlight-canonical {
+  background: rgba(100, 181, 246, 0.25);
+  border-bottom: 2px solid var(--highlight-hue, #64b5f6);
+}
+
+.text-highlight-duplicate {
+  background: rgba(239, 83, 80, 0.2);
+  border-bottom: 2px solid var(--highlight-hue, #ef5350);
+}
+
+.text-highlight-active {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.import-paste-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.paste-text-area {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}
+
+.btn-secondary {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 #grid-container {

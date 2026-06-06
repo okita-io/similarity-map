@@ -327,6 +327,7 @@ export class DisplaySettingsPanel {
 
     // Targeted re-raster: only pages containing this cluster
     await this._rasterPages(cluster.pages);
+    window.textPreviewPanel?.setActiveCluster(visible ? clusterId : null);
     this._schedulePersist();
   }
 

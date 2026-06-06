@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::types::{AppError, DisplayState, SessionError};
+use similarity_core::types::{AppError, DisplayState, SessionError};
 
 /// Returns the sessions directory path: `<app_data_dir>/sessions`
 pub fn sessions_dir(app_data_dir: &Path) -> PathBuf {

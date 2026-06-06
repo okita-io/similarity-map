@@ -4,6 +4,7 @@
 import { ProgressView } from "./progress-view.js";
 import { bindSliderNumberInput } from "./slider-input.js";
 import { activateJob } from "./job-activation.js";
+import { applyVisualizationPayload } from "./text-preview.js";
 
 /**
  * @typedef {Object} AnalysisEstimate
@@ -269,6 +270,22 @@ export class ImportSettingsPanel {
           </div>
         </div>
 
+        <div class="import-paste-section">
+          <label class="setting-label" for="paste-text-area">
+            Paste text (Romance Factory output)
+          </label>
+          <textarea
+            id="paste-text-area"
+            class="paste-text-area"
+            rows="5"
+            placeholder="Paste a chapter or excerpt to tune phrase length and tolerance against LLM output…"
+            aria-label="Pasted manuscript text"
+          ></textarea>
+          <button id="btn-analyze-text" class="btn-secondary" type="button">
+            Analyze Pasted Text
+          </button>
+        </div>
+
         <div class="import-settings-actions">
           <button id="btn-analyze" class="btn-analyze" type="button">Analyze</button>
         </div>
@@ -298,6 +315,8 @@ export class ImportSettingsPanel {
       estimateTime: this.container.querySelector("#estimate-time"),
       estimateNudge: this.container.querySelector("#estimate-nudge"),
       btnAnalyze: this.container.querySelector("#btn-analyze"),
+      pasteTextArea: this.container.querySelector("#paste-text-area"),
+      btnAnalyzeText: this.container.querySelector("#btn-analyze-text"),
     };
   }
 
@@ -367,6 +386,10 @@ export class ImportSettingsPanel {
     // Analyze button
     this._els.btnAnalyze.addEventListener("click", () => {
       this._startAnalysis();
+    });
+
+    this._els.btnAnalyzeText.addEventListener("click", () => {
+      this._startTextAnalysis();
     });
   }
 
@@ -661,6 +684,67 @@ export class ImportSettingsPanel {
       console.error("analyze_document failed:", err);
       await this._restoreSettingsView();
       this._showAnalysisError(err);
+    }
+  }
+
+  /** Analyze pasted plain text (Romance Factory output) and apply visualization JSON. */
+  async _startTextAnalysis() {
+    if (!this._validateChapterBreak()) return;
+
+    const text = this._els.pasteTextArea?.value?.trim();
+    if (!text) {
+      this._showAnalysisError("Paste manuscript text before analyzing.");
+      return;
+    }
+
+    const settings = this.getSettings();
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    this._savedSettings = { ...settings };
+    this._els.btnAnalyzeText.disabled = true;
+
+    try {
+      this._showProgressView("");
+    } catch (renderErr) {
+      console.error("Failed to render progress view:", renderErr);
+      this._els.btnAnalyzeText.disabled = false;
+      return;
+    }
+
+    try {
+      window.currentJobId = "";
+      const payload = await invoke("analyze_text", {
+        text,
+        label: "rf_paste",
+        windowSize: settings.phraseLength,
+        stride: settings.stride,
+        tokensPerPage: settings.tokensPerPage,
+        chapterBreakRegex: settings.chapterBreak || null,
+        minRepetitions: settings.minRepetitions,
+        minSamples: settings.minSamples,
+        enableHdbscan: settings.enableHdbscan,
+        linkSubphrases: settings.linkSubphrases,
+      });
+
+      if (payload?.job_id) {
+        if (this._progressView) {
+          this._progressView.setJobId(payload.job_id);
+        }
+        this.filePath = payload.job_id;
+        this.isPdf = false;
+        this._els.fileName.textContent = "Pasted text";
+        await applyVisualizationPayload(payload);
+      }
+    } catch (err) {
+      console.error("analyze_text failed:", err);
+      this._showAnalysisError(err);
+    } finally {
+      this._els.btnAnalyzeText.disabled = false;
+      await this._restoreSettingsView();
     }
   }
 

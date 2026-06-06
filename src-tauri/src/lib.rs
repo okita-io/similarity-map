@@ -1,24 +1,11 @@
-pub mod benchmark;
-pub mod cancellation;
-pub mod centroid;
-pub mod clustering;
-pub mod color;
 pub mod commands;
 pub mod display_state;
-pub mod embedding;
 pub mod events;
-pub mod hash;
-pub mod importer;
-pub mod job_data;
-pub mod model;
-pub mod ort_runtime;
 pub mod pipeline;
 pub mod rasterizer;
 pub mod results_catalog;
-pub mod storage;
-pub mod subcell;
-pub mod types;
-pub mod windowing;
+
+pub use similarity_core;
 
 use commands::*;
 
@@ -38,6 +25,9 @@ pub fn run() {
             raster_pages,
             get_page_detail,
             get_cluster_registry,
+            get_repetition_report,
+            get_visualization_payload,
+            analyze_text,
             save_display_state,
             list_document_results,
             save_document_result,

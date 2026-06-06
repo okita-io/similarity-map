@@ -12,22 +12,20 @@ use std::time::Instant;
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
-use crate::cancellation::{self};
-use crate::centroid::{build_cluster_registry, WindowData};
-use crate::clustering::{
-    cluster_by_kmeans_similarity, derive_min_cluster_size, merge_subsumed_clusters, run_hdbscan,
-    stabilize_clusters, validate_clustering_params,
+use similarity_core::cancellation::{self};
+use similarity_core::centroid::{build_cluster_registry, WindowData};
+use similarity_core::clustering::{
+    derive_min_cluster_size, validate_clustering_params,
 };
-use crate::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
+use similarity_core::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
 use crate::events;
-use crate::hash::{compute_document_hash, compute_settings_hash};
-use crate::importer;
-use crate::model;
+use similarity_core::hash::{compute_document_hash, compute_settings_hash};
+use similarity_core::model;
 use crate::rasterizer::{encode_canvas_base64, rasterize_page};
-use crate::storage::{InsertJobParams, PageRecord, Storage, WindowRecord};
-use crate::subcell::{build_page_sub_grids, compute_sub_cell, WindowSubCellData};
-use crate::types::*;
-use crate::windowing::generate_windows;
+use similarity_core::storage::{InsertJobParams, PageRecord, Storage, WindowRecord};
+use similarity_core::subcell::{build_page_sub_grids, compute_sub_cell, WindowSubCellData};
+use similarity_core::types::*;
+use similarity_core::windowing::generate_windows;
 
 /// Configuration for the analysis pipeline.
 pub struct PipelineConfig {
@@ -197,31 +195,24 @@ fn run_clustering(
     all_embeddings: &[Vec<f32>],
     windows: &[Window],
 ) -> Result<(Vec<i32>, Vec<i32>), AppError> {
-    let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
-    let min_cluster_size = derive_min_cluster_size(
-        config.min_repetitions,
-        config.window_size,
-        config.stride,
-    );
+    similarity_core::analysis::run_clustering(
+        &pipeline_config_to_analysis_params(config),
+        all_embeddings,
+        windows,
+    )
+}
 
-    let (hdbscan_labels, mut stable_labels) = if config.enable_hdbscan {
-        let labels = run_hdbscan(all_embeddings, min_cluster_size, config.min_samples)?;
-        let stable = stabilize_clusters(all_embeddings, &labels, &window_indices);
-        (labels, stable)
-    } else {
-        let stable =
-            cluster_by_kmeans_similarity(all_embeddings, &window_indices, min_cluster_size)?;
-        let labels = vec![-1i32; all_embeddings.len()];
-        (labels, stable)
-    };
-
-    if config.link_subphrases {
-        let texts: Vec<String> = windows.iter().map(|w| w.text.clone()).collect();
-        let pages: Vec<u32> = windows.iter().map(|w| w.page).collect();
-        merge_subsumed_clusters(&mut stable_labels, all_embeddings, &texts, &pages);
+fn pipeline_config_to_analysis_params(config: &PipelineConfig) -> similarity_core::AnalysisParams {
+    similarity_core::AnalysisParams {
+        window_size: config.window_size,
+        stride: config.stride,
+        tokens_per_page: config.tokens_per_page,
+        chapter_break_regex: config.chapter_break_regex.clone(),
+        min_repetitions: config.min_repetitions,
+        min_samples: config.min_samples,
+        enable_hdbscan: config.enable_hdbscan,
+        link_subphrases: config.link_subphrases,
     }
-
-    Ok((hdbscan_labels, stable_labels))
 }
 
 /// Emit a page-ready event with the rasterized canvas.
@@ -1220,33 +1211,14 @@ fn validate_params(config: &PipelineConfig) -> Result<(), AppError> {
 
 /// Import and paginate the document based on file type and config.
 fn import_document(file_path: &Path, config: &PipelineConfig) -> Result<Vec<Page>, AppError> {
-    let is_pdf = file_path
-        .extension()
-        .map(|ext| ext.eq_ignore_ascii_case("pdf"))
-        .unwrap_or(false);
-
-    if is_pdf {
-        importer::import_pdf(file_path)
-    } else {
-        let text = std::fs::read_to_string(file_path).map_err(|e| {
-            AppError::Import(ImportError {
-                message: format!("Failed to read file: {}", e),
-                path: Some(config.path.clone()),
-            })
-        })?;
-
-        // Use chapter break pagination if regex is provided
-        if let Some(ref regex_str) = config.chapter_break_regex {
-            if !regex_str.is_empty() {
-                let tpp = config.tokens_per_page.unwrap_or(400);
-                return importer::paginate_by_chapter_break(&text, regex_str, tpp);
-            }
-        }
-
-        // Default to token-count pagination
-        let tpp = config.tokens_per_page.unwrap_or(400);
-        importer::paginate_by_token_count(&text, tpp)
-    }
+    similarity_core::importer::import_document(
+        file_path,
+        &similarity_core::ImportDocumentParams {
+            path: config.path.clone(),
+            tokens_per_page: config.tokens_per_page,
+            chapter_break_regex: config.chapter_break_regex.clone(),
+        },
+    )
 }
 
 /// Compute cosine similarity between two vectors.

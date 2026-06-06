@@ -3,6 +3,13 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+/// Compute the SHA-256 hash of raw text, returned as a lowercase hex string.
+pub fn compute_text_hash(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 /// Compute the SHA-256 hash of a file's contents, returned as a lowercase hex string.
 pub fn compute_document_hash(path: &Path) -> Result<String, io::Error> {
     let contents = fs::read(path)?;

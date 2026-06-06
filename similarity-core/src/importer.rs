@@ -337,6 +337,46 @@ fn split_segment_by_token_count(
     result
 }
 
+/// Parameters for importing a manuscript from disk.
+#[derive(Debug, Clone)]
+pub struct ImportDocumentParams {
+    pub path: String,
+    pub tokens_per_page: Option<u32>,
+    pub chapter_break_regex: Option<String>,
+}
+
+/// Import and paginate a document based on file type and pagination settings.
+pub fn import_document(
+    file_path: &Path,
+    params: &ImportDocumentParams,
+) -> Result<Vec<Page>, AppError> {
+    let is_pdf = file_path
+        .extension()
+        .map(|ext| ext.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+
+    if is_pdf {
+        import_pdf(file_path)
+    } else {
+        let text = std::fs::read_to_string(file_path).map_err(|e| {
+            AppError::Import(ImportError {
+                message: format!("Failed to read file: {}", e),
+                path: Some(params.path.clone()),
+            })
+        })?;
+
+        if let Some(ref regex_str) = params.chapter_break_regex {
+            if !regex_str.is_empty() {
+                let tpp = params.tokens_per_page.unwrap_or(400);
+                return paginate_by_chapter_break(&text, regex_str, tpp);
+            }
+        }
+
+        let tpp = params.tokens_per_page.unwrap_or(400);
+        paginate_by_token_count(&text, tpp)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
