@@ -22,6 +22,9 @@ pub enum PaginationMode {
     Pdf,
     Token,
     Chapter,
+    /// One page per act (or manifest segment) for Romance Factory chapter analysis.
+    #[serde(rename = "scope_segment")]
+    ScopeSegment,
 }
 
 /// A text window — the atomic unit of comparison.

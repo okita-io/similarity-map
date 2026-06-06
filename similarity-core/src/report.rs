@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::centroid::{build_cluster_registry, WindowData};
 use crate::importer::{import_document, ImportDocumentParams};
 use crate::job_data::parse_window_data_from_batches;
-use crate::spans::{expand_to_sentence_boundaries, merge_overlapping_spans};
+use crate::spans::{
+    expand_to_sentence_boundaries, merge_overlapping_spans, sentence_index_at_char_offset,
+};
 use crate::storage::{Storage, StorageError};
 use crate::types::{AppError, ClusterRegistry, Page, SessionError};
 
@@ -221,15 +223,143 @@ pub fn derive_cluster_enrichments(spans: &[EditSpan]) -> (bool, bool, SuggestedO
     (cross_act, needs_bridge, suggested_op)
 }
 
+/// Resolve structural location for a document span against a scope manifest.
+///
+/// `scope_char_start` / `scope_char_end` are act-relative offsets suitable for surgical
+/// [`PatchTarget`] resolution within the containing act; `doc_char_*` remain absolute.
+pub fn resolve_span_location(
+    document_text: &str,
+    manifest: &ScopeManifest,
+    doc_char_start: u32,
+    doc_char_end: u32,
+) -> SpanLocation {
+    for act in &manifest.acts {
+        if doc_char_start >= act.doc_char_start && doc_char_start < act.doc_char_end {
+            for para in &act.paragraphs {
+                if doc_char_start >= para.doc_char_start && doc_char_start < para.doc_char_end {
+                    let para_text = slice_document_text(
+                        document_text,
+                        para.doc_char_start,
+                        para.doc_char_end,
+                    );
+                    let local_start = doc_char_start.saturating_sub(para.doc_char_start) as usize;
+                    let sentence_index = sentence_index_at_char_offset(&para_text, local_start);
+                    return SpanLocation {
+                        chapter: manifest.chapter,
+                        act: act.act,
+                        paragraph_index: para.paragraph_index,
+                        segment_id: para.segment_id.clone(),
+                        sentence_index,
+                        scope_char_start: doc_char_start.saturating_sub(act.doc_char_start),
+                        scope_char_end: doc_char_end.saturating_sub(act.doc_char_start),
+                        doc_char_start,
+                        doc_char_end,
+                    };
+                }
+            }
+
+            return SpanLocation {
+                chapter: manifest.chapter,
+                act: act.act,
+                paragraph_index: 1,
+                segment_id: format_segment_id(manifest.chapter, act.act, 1),
+                sentence_index: 1,
+                scope_char_start: doc_char_start.saturating_sub(act.doc_char_start),
+                scope_char_end: doc_char_end.saturating_sub(act.doc_char_start),
+                doc_char_start,
+                doc_char_end,
+            };
+        }
+    }
+
+    let fallback_act = manifest.acts.first();
+    let act_num = fallback_act.map(|a| a.act).unwrap_or(1);
+    let act_doc = fallback_act.map(|a| a.doc_char_start).unwrap_or(0);
+    SpanLocation {
+        chapter: manifest.chapter,
+        act: act_num,
+        paragraph_index: 1,
+        segment_id: format_segment_id(manifest.chapter, act_num, 1),
+        sentence_index: 1,
+        scope_char_start: doc_char_start.saturating_sub(act_doc),
+        scope_char_end: doc_char_end.saturating_sub(act_doc),
+        doc_char_start,
+        doc_char_end,
+    }
+}
+
+fn find_act_for_doc_char<'a>(
+    manifest: &'a ScopeManifest,
+    doc_char: u32,
+) -> Option<&'a ScopeSegment> {
+    manifest.acts.iter().find(|act| {
+        doc_char >= act.doc_char_start && doc_char < act.doc_char_end
+    })
+}
+
+/// Clip and optionally expand a span within its containing act.
+fn clip_and_expand_span_in_act(
+    document_text: &str,
+    manifest: &ScopeManifest,
+    doc_char_start: u32,
+    doc_char_end: u32,
+    expand_to_sentences: bool,
+) -> (u32, u32) {
+    let Some(act) = find_act_for_doc_char(manifest, doc_char_start) else {
+        return if expand_to_sentences {
+            expand_to_sentence_boundaries(document_text, doc_char_start, doc_char_end)
+        } else {
+            (doc_char_start, doc_char_end)
+        };
+    };
+
+    let clipped_start = doc_char_start.max(act.doc_char_start);
+    let clipped_end = doc_char_end.min(act.doc_char_end);
+
+    if !expand_to_sentences {
+        return (clipped_start, clipped_end);
+    }
+
+    let act_text = slice_document_text(document_text, act.doc_char_start, act.doc_char_end);
+    let local_start = clipped_start - act.doc_char_start;
+    let local_end = clipped_end - act.doc_char_start;
+    let (exp_local_start, exp_local_end) =
+        expand_to_sentence_boundaries(&act_text, local_start, local_end);
+
+    (
+        act.doc_char_start + exp_local_start,
+        act.doc_char_start + exp_local_end,
+    )
+}
+
 /// Build an editorial repetition report from clustered window data.
 ///
 /// When `expand_to_sentences` is true, each merged instance span is expanded
-/// to sentence (or paragraph) boundaries before extracting text.
+/// to sentence (or paragraph) boundaries before extracting text. When `manifest`
+/// is provided, spans are clipped to their act first and expansion runs on act
+/// text only; each [`EditSpan`] receives a resolved [`SpanLocation`].
 pub fn build_repetition_report(
     job_id: &str,
     document_text: &str,
     windows: &[WindowData],
     expand_to_sentences: bool,
+) -> RepetitionReport {
+    build_repetition_report_with_manifest(
+        job_id,
+        document_text,
+        windows,
+        expand_to_sentences,
+        None,
+    )
+}
+
+/// Like [`build_repetition_report`] but resolves [`SpanLocation`] when `manifest` is set.
+pub fn build_repetition_report_with_manifest(
+    job_id: &str,
+    document_text: &str,
+    windows: &[WindowData],
+    expand_to_sentences: bool,
+    manifest: Option<&ScopeManifest>,
 ) -> RepetitionReport {
     let registry = build_cluster_registry(windows);
     build_repetition_report_from_registry(
@@ -238,6 +368,7 @@ pub fn build_repetition_report(
         windows,
         &registry,
         expand_to_sentences,
+        manifest,
     )
 }
 
@@ -247,6 +378,7 @@ pub fn build_repetition_report_from_registry(
     windows: &[WindowData],
     registry: &ClusterRegistry,
     expand_to_sentences: bool,
+    manifest: Option<&ScopeManifest>,
 ) -> RepetitionReport {
     let mut clusters: Vec<ClusterSummary> = registry
         .clusters
@@ -271,7 +403,15 @@ pub fn build_repetition_report_from_registry(
                 .into_iter()
                 .enumerate()
                 .map(|(idx, span)| {
-                    let (start, end) = if expand_to_sentences {
+                    let (start, end) = if let Some(manifest) = manifest {
+                        clip_and_expand_span_in_act(
+                            document_text,
+                            manifest,
+                            span.doc_char_start,
+                            span.doc_char_end,
+                            expand_to_sentences,
+                        )
+                    } else if expand_to_sentences {
                         expand_to_sentence_boundaries(
                             document_text,
                             span.doc_char_start,
@@ -283,6 +423,9 @@ pub fn build_repetition_report_from_registry(
 
                     let text = slice_document_text(document_text, start, end);
                     let similarity = best_similarity_in_span(&cluster_windows, start, end);
+                    let location = manifest.map(|m| {
+                        resolve_span_location(document_text, m, start, end)
+                    });
 
                     EditSpan {
                         cluster_id: info.cluster_id,
@@ -292,7 +435,7 @@ pub fn build_repetition_report_from_registry(
                         text,
                         similarity_to_centroid: similarity,
                         member_window_count: span.member_window_count,
-                        location: None,
+                        location,
                     }
                 })
                 .collect();
@@ -421,6 +564,7 @@ fn best_similarity_in_span(cluster_windows: &[&WindowData], start: u32, end: u32
 mod tests {
     use super::*;
     use crate::centroid::WindowData;
+    use crate::contract::build_scope_manifest;
 
     fn make_window(
         id: &str,
@@ -697,5 +841,77 @@ mod tests {
         assert_eq!(cluster.suggested_op, SuggestedOp::Remove);
         assert!(cluster.canonical.location.is_none());
         assert!(report.schema_version.is_none());
+    }
+
+    #[test]
+    fn resolve_span_location_maps_act_and_paragraph() {
+        let doc = "Act one para one.\n\nAct two para one.";
+        let manifest = build_scope_manifest(1, doc, 0);
+        let act2_start = doc.find("Act two").unwrap() as u32;
+        let loc = resolve_span_location(
+            doc,
+            &manifest,
+            act2_start,
+            act2_start + "Act two".len() as u32,
+        );
+        assert_eq!(loc.act, 2);
+        assert_eq!(loc.segment_id, "ch01_a02_p01");
+        assert_eq!(loc.scope_char_start, 0);
+    }
+
+    #[test]
+    fn cross_act_duplicate_sets_cross_act_with_manifest() {
+        let doc = "Echo phrase here.\n\nEcho phrase here.";
+        let act2_start = doc.find("\n\n").unwrap() + 2;
+        let phrase_len = "Echo phrase here.".len() as u32;
+
+        let windows = vec![
+            make_window("w1", 0, 1, 0, phrase_len, "Echo phrase here."),
+            make_window(
+                "w2",
+                1,
+                1,
+                act2_start as u32,
+                act2_start as u32 + phrase_len,
+                "Echo phrase here.",
+            ),
+        ];
+        let manifest = build_scope_manifest(1, doc, 0);
+        let report =
+            build_repetition_report_with_manifest("job-x", doc, &windows, false, Some(&manifest));
+
+        assert_eq!(report.clusters.len(), 1);
+        let cluster = &report.clusters[0];
+        assert!(cluster.cross_act);
+        assert_eq!(cluster.duplicates.len(), 1);
+        assert_eq!(cluster.canonical.location.as_ref().unwrap().act, 1);
+        assert_eq!(cluster.duplicates[0].location.as_ref().unwrap().act, 2);
+    }
+
+    #[test]
+    fn sentence_expansion_runs_per_act_after_clip() {
+        let doc = "First act ends here.\n\nSecond act begins now.";
+        let act1_phrase = "First act ends here.";
+        let act1_end = act1_phrase.len() as u32;
+        let inner_start = "First act ends".len() as u32;
+        let inner_end = inner_start + 4;
+
+        let windows = vec![make_window(
+            "w1",
+            0,
+            1,
+            inner_start,
+            inner_end,
+            "ends",
+        )];
+        let manifest = build_scope_manifest(1, doc, 0);
+
+        let report =
+            build_repetition_report_with_manifest("job-y", doc, &windows, true, Some(&manifest));
+
+        let cluster = &report.clusters[0];
+        assert_eq!(cluster.canonical.text, act1_phrase);
+        assert!(cluster.canonical.doc_char_end <= act1_end);
+        assert!(!cluster.canonical.text.contains("Second act"));
     }
 }

@@ -1,3 +1,4 @@
+use crate::report::ScopeManifest;
 use crate::types::{AppError, ImportError, Page, PaginationMode, ValidationError};
 use std::path::Path;
 
@@ -120,6 +121,80 @@ pub fn paginate_by_token_count(text: &str, tokens_per_page: u32) -> Result<Vec<P
 
         doc_offset += page_end_offset;
         page_num += 1;
+    }
+
+    Ok(pages)
+}
+
+/// Paginate chapter scope text into one page per manifest act segment.
+///
+/// Slices use the same `[scope_char_start, scope_char_end)` ranges as
+/// [`crate::contract::build_scope_manifest`]. Each page's `char_offset_in_doc` is
+/// set to the segment's `doc_char_start` so window offsets align with the manifest.
+pub fn paginate_scope(manifest: &ScopeManifest, text: &str) -> Result<Vec<Page>, AppError> {
+    if text.is_empty() || text.chars().all(|c| c.is_whitespace()) {
+        return Err(AppError::Import(ImportError {
+            message: "Text contains no analyzable content".to_string(),
+            path: None,
+        }));
+    }
+
+    if manifest.acts.is_empty() {
+        return Err(AppError::Import(ImportError {
+            message: "Scope manifest contains no act segments".to_string(),
+            path: None,
+        }));
+    }
+
+    let text_len = text.len();
+    let mut pages: Vec<Page> = Vec::with_capacity(manifest.acts.len());
+    let mut page_num: u32 = 1;
+
+    for act in &manifest.acts {
+        let start = act.scope_char_start as usize;
+        let end = act.scope_char_end as usize;
+
+        if end > text_len {
+            return Err(AppError::Validation(ValidationError {
+                field: "scope_manifest".to_string(),
+                message: format!(
+                    "Act {} scope_char_end ({}) exceeds chapter text length ({})",
+                    act.act, end, text_len
+                ),
+            }));
+        }
+
+        if start > end {
+            return Err(AppError::Validation(ValidationError {
+                field: "scope_manifest".to_string(),
+                message: format!(
+                    "Act {} has invalid scope range [{}, {})",
+                    act.act, start, end
+                ),
+            }));
+        }
+
+        let page_text = &text[start..end];
+        if page_text.trim().is_empty() {
+            continue;
+        }
+
+        pages.push(Page {
+            page_num,
+            text: page_text.to_string(),
+            char_offset_in_doc: act.doc_char_start,
+            char_count: (end - start) as u32,
+            token_count: page_text.split_whitespace().count() as u32,
+            pagination_mode: PaginationMode::ScopeSegment,
+        });
+        page_num += 1;
+    }
+
+    if pages.is_empty() {
+        return Err(AppError::Import(ImportError {
+            message: "Scope manifest produced no analyzable act pages".to_string(),
+            path: None,
+        }));
     }
 
     Ok(pages)
@@ -807,6 +882,130 @@ mod tests {
 
         for (i, page) in pages.iter().enumerate() {
             assert_eq!(page.page_num, (i + 1) as u32);
+        }
+    }
+
+    // ─── Scope Segment Pagination Tests ────────────────────────────────────────
+
+    #[test]
+    fn test_paginate_scope_one_page_per_act() {
+        use crate::contract::build_scope_manifest;
+
+        let text = "Act one para one.\n\nAct two para one.\nAct two para two.";
+        let manifest = build_scope_manifest(1, text, 0);
+        let pages = paginate_scope(&manifest, text).unwrap();
+
+        assert_eq!(pages.len(), manifest.acts.len());
+        assert_eq!(pages[0].pagination_mode, PaginationMode::ScopeSegment);
+        assert_eq!(pages[0].text, "Act one para one.");
+        assert_eq!(pages[1].text, "Act two para one.\nAct two para two.");
+    }
+
+    #[test]
+    fn test_paginate_scope_doc_char_start_alignment() {
+        use crate::contract::build_scope_manifest;
+
+        let text = "First act here.\n\nSecond act here.";
+        let doc_offset = 1200u32;
+        let manifest = build_scope_manifest(3, text, doc_offset);
+        let pages = paginate_scope(&manifest, text).unwrap();
+
+        for (page, act) in pages.iter().zip(manifest.acts.iter()) {
+            assert_eq!(page.char_offset_in_doc, act.doc_char_start);
+            let start = act.scope_char_start as usize;
+            let end = act.scope_char_end as usize;
+            assert_eq!(&text[start..end], page.text);
+            assert_eq!(page.char_count, (end - start) as u32);
+        }
+    }
+
+    #[test]
+    fn test_paginate_scope_windows_stay_within_act() {
+        use crate::contract::build_scope_manifest;
+        use crate::windowing::generate_windows;
+
+        let text = "Alpha beta gamma delta epsilon zeta eta theta.\n\nIota kappa lambda mu nu xi omicron pi.";
+        let manifest = build_scope_manifest(1, text, 500);
+        let pages = paginate_scope(&manifest, text).unwrap();
+        let windows = generate_windows(&pages, 5, 2);
+
+        assert!(!windows.is_empty());
+        for window in &windows {
+            let act = manifest
+                .acts
+                .iter()
+                .find(|act| {
+                    window.doc_char_start >= act.doc_char_start
+                        && window.doc_char_start < act.doc_char_end
+                })
+                .expect("window should belong to exactly one act");
+            assert!(
+                window.doc_char_start < act.doc_char_end,
+                "window start must stay inside act {}",
+                act.act
+            );
+            let window_end = window.doc_char_start + window.text.len() as u32;
+            assert!(
+                window_end <= act.doc_char_end,
+                "window end {} must not exceed act {} end {}",
+                window_end,
+                act.act,
+                act.doc_char_end
+            );
+        }
+    }
+
+    #[test]
+    fn test_paginate_text_without_manifest_unchanged() {
+        use crate::analysis::{paginate_text, AnalysisParams};
+
+        let text = "one two three four five six seven eight nine ten";
+        let params = AnalysisParams {
+            window_size: 50,
+            stride: 10,
+            tokens_per_page: Some(3),
+            chapter_break_regex: None,
+            min_repetitions: 3,
+            min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
+        };
+
+        let pages = paginate_text(text, &params, None).unwrap();
+        let expected = paginate_by_token_count(text, 3).unwrap();
+        assert_eq!(pages.len(), expected.len());
+        for (page, exp) in pages.iter().zip(expected.iter()) {
+            assert_eq!(page.text, exp.text);
+            assert_eq!(page.char_offset_in_doc, exp.char_offset_in_doc);
+            assert_eq!(page.pagination_mode, PaginationMode::Token);
+        }
+    }
+
+    #[test]
+    fn test_paginate_text_with_manifest_uses_scope_segments() {
+        use crate::analysis::{paginate_text, AnalysisParams};
+        use crate::contract::build_scope_manifest;
+
+        let text = "Act one words here.\n\nAct two words follow.";
+        let manifest = build_scope_manifest(1, text, 0);
+        let params = AnalysisParams {
+            window_size: 50,
+            stride: 10,
+            tokens_per_page: Some(3),
+            chapter_break_regex: Some("^Chapter".to_string()),
+            min_repetitions: 3,
+            min_samples: 3,
+            enable_hdbscan: true,
+            link_subphrases: false,
+        };
+
+        let pages = paginate_text(text, &params, Some(&manifest)).unwrap();
+        let scope_pages = paginate_scope(&manifest, text).unwrap();
+        assert_eq!(pages.len(), scope_pages.len());
+        for (page, scope_page) in pages.iter().zip(scope_pages.iter()) {
+            assert_eq!(page.text, scope_page.text);
+            assert_eq!(page.char_offset_in_doc, scope_page.char_offset_in_doc);
+            assert_eq!(page.pagination_mode, PaginationMode::ScopeSegment);
         }
     }
 }

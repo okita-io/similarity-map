@@ -11,6 +11,8 @@ use crate::report::{
     SCHEMA_VERSION,
 };
 
+pub use crate::report::resolve_span_location;
+
 /// JSON contract alias for [`ScopeSegment`].
 pub type ActSegment = ScopeSegment;
 
@@ -164,79 +166,17 @@ pub fn build_scope_manifest(
     ScopeManifest { chapter, acts }
 }
 
-/// Resolve structural location for a document span against a scope manifest.
-pub fn resolve_span_location(
-    manifest: &ScopeManifest,
-    scope_base_doc: u32,
-    doc_char_start: u32,
-    doc_char_end: u32,
-    paragraph_text: &str,
-) -> SpanLocation {
-    for act in &manifest.acts {
-        for para in &act.paragraphs {
-            if doc_char_start >= para.doc_char_start && doc_char_start < para.doc_char_end {
-                let sentence_index =
-                    sentence_index_in_paragraph(paragraph_text, doc_char_start, para);
-                return SpanLocation {
-                    chapter: manifest.chapter,
-                    act: act.act,
-                    paragraph_index: para.paragraph_index,
-                    segment_id: para.segment_id.clone(),
-                    sentence_index,
-                    scope_char_start: doc_char_start.saturating_sub(scope_base_doc),
-                    scope_char_end: doc_char_end.saturating_sub(scope_base_doc),
-                    doc_char_start,
-                    doc_char_end,
-                };
-            }
-        }
-    }
-
-    let fallback_act = manifest.acts.first();
-    SpanLocation {
-        chapter: manifest.chapter,
-        act: fallback_act.map(|a| a.act).unwrap_or(1),
-        paragraph_index: 1,
-        segment_id: format_segment_id(
-            manifest.chapter,
-            fallback_act.map(|a| a.act).unwrap_or(1),
-            1,
-        ),
-        sentence_index: 1,
-        scope_char_start: doc_char_start.saturating_sub(scope_base_doc),
-        scope_char_end: doc_char_end.saturating_sub(scope_base_doc),
-        doc_char_start,
-        doc_char_end,
-    }
-}
-
-fn sentence_index_in_paragraph(
-    paragraph_text: &str,
-    doc_char_start: u32,
-    para: &ParagraphSpan,
-) -> u32 {
-    let local_start = doc_char_start.saturating_sub(para.doc_char_start) as usize;
-    let before = &paragraph_text[..local_start.min(paragraph_text.len())];
-    let mut index = 1u32;
-    for ch in before.chars() {
-        if matches!(ch, '.' | '!' | '?') {
-            index += 1;
-        }
-    }
-    index
-}
-
 /// Convert a legacy [`RepetitionReport`] into v1 with locations and cluster enrichments.
 pub fn repetition_report_to_v1(
     report: &RepetitionReport,
     manifest: &ScopeManifest,
-    scope_base_doc: u32,
+    _scope_base_doc: u32,
     chapter_text: &str,
 ) -> RepetitionReportV1 {
     let clusters = report
         .clusters
         .iter()
-        .map(|cluster| cluster_summary_to_v1(cluster, manifest, scope_base_doc, chapter_text))
+        .map(|cluster| cluster_summary_to_v1(cluster, manifest, chapter_text))
         .collect();
 
     RepetitionReportV1 {
@@ -249,17 +189,16 @@ pub fn repetition_report_to_v1(
 fn cluster_summary_to_v1(
     cluster: &crate::report::ClusterSummary,
     manifest: &ScopeManifest,
-    scope_base_doc: u32,
     chapter_text: &str,
 ) -> ClusterSummaryV1 {
     let spans: Vec<EditSpanV1> = cluster
         .spans
         .iter()
-        .map(|span| edit_span_to_v1(span, manifest, scope_base_doc, chapter_text))
+        .map(|span| edit_span_to_v1(span, manifest, chapter_text))
         .collect();
 
     let canonical = spans.first().cloned().unwrap_or_else(|| {
-        edit_span_to_v1(&cluster.canonical, manifest, scope_base_doc, chapter_text)
+        edit_span_to_v1(&cluster.canonical, manifest, chapter_text)
     });
     let duplicates: Vec<EditSpanV1> = spans.iter().skip(1).cloned().collect();
 
@@ -291,16 +230,14 @@ fn cluster_summary_to_v1(
 fn edit_span_to_v1(
     span: &EditSpan,
     manifest: &ScopeManifest,
-    scope_base_doc: u32,
     chapter_text: &str,
 ) -> EditSpanV1 {
     let location = span.location.clone().unwrap_or_else(|| {
         resolve_span_location(
+            chapter_text,
             manifest,
-            scope_base_doc,
             span.doc_char_start,
             span.doc_char_end,
-            chapter_text,
         )
     });
     EditSpanV1 {
