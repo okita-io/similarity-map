@@ -30,15 +30,16 @@ pub use visualization::{
 };
 
 pub use contract::{
-    build_analysis_output, build_scope_manifest, format_segment_id, from_export_json,
-    merge_pass_reports, repetition_report_to_v1, to_export_json, validate_analysis_output,
-    ActSegment, AnalysisOutput, AnalysisPassRecord, AnalysisScope, ClusterSummaryV1,
-    ContractError, EditSpanV1, ParagraphIndexEntry, RepetitionReportV1, ScopeManifest,
-    SpanLocation, SuggestedOp, SCHEMA_VERSION,
+    build_analysis_output, build_scope_manifest, from_export_json, merge_pass_reports,
+    repetition_report_to_v1, to_export_json, validate_analysis_output, ActSegment,
+    AnalysisOutput, AnalysisPassRecord, ClusterSummaryV1, ContractError, EditSpanV1,
+    ParagraphIndexEntry, RepetitionReportV1,
 };
 pub use report::{
     build_repetition_report, build_repetition_report_from_registry,
-    load_repetition_report_from_storage, pages_to_document_text, AnalysisStats, ClusterSummary,
-    EditSpan, RepetitionReport,
+    derive_cluster_enrichments, format_segment_id, load_repetition_report_from_storage,
+    pages_to_document_text, AnalysisScope, AnalysisStats, ClusterSummary, EditSpan,
+    ParagraphSpan, RepetitionReport, ReportAnalysisParams, ScopeManifest, ScopeSegment,
+    SpanLocation, SuggestedOp, SCHEMA_VERSION,
 };
 pub use spans::{expand_to_sentence_boundaries, merge_overlapping_spans, MergedSpan};

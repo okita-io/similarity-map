@@ -5,91 +5,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::report::{AnalysisStats, EditSpan, RepetitionReport};
+use crate::report::{
+    derive_cluster_enrichments, format_segment_id, AnalysisScope, AnalysisStats, EditSpan,
+    ParagraphSpan, RepetitionReport, ScopeManifest, ScopeSegment, SpanLocation, SuggestedOp,
+    SCHEMA_VERSION,
+};
 
-/// Current schema version string written to every [`AnalysisOutput`].
-pub const SCHEMA_VERSION: &str = "1";
+/// JSON contract alias for [`ScopeSegment`].
+pub type ActSegment = ScopeSegment;
 
-/// Editorial operation suggested for a repetition cluster.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SuggestedOp {
-    /// Keep the canonical instance; no edit required on duplicates beyond optional polish.
-    Keep,
-    /// Rewrite duplicate instances in place.
-    Rewrite,
-    /// Remove duplicate instances (same-act near-exact echo).
-    Remove,
-    /// Insert transitional bridge prose between acts before rewriting.
-    Bridge,
-}
-
-/// What manuscript unit this analysis covers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisScope {
-    /// 1-based chapter number within the story.
-    pub chapter: u32,
-    /// 1-based act when the pass targets a single act; omitted for whole-chapter scope.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub act: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document_hash: Option<String>,
-    /// Character range of this scope within the chapter text (inclusive start, exclusive end).
-    pub scope_char_start: u32,
-    pub scope_char_end: u32,
-    /// Absolute document offsets for the same range.
-    pub doc_char_start: u32,
-    pub doc_char_end: u32,
-}
-
-/// One paragraph entry in the nested act index.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParagraphIndexEntry {
-    /// 1-based paragraph index within the act.
-    pub paragraph_index: u32,
-    /// Stable segment id: `ch{NN}_a{MM}_p{PP}` (zero-padded).
-    pub segment_id: String,
-    pub scope_char_start: u32,
-    pub scope_char_end: u32,
-    pub doc_char_start: u32,
-    pub doc_char_end: u32,
-}
-
-/// One act segment with nested paragraph index.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActSegment {
-    /// 1-based act number within the chapter.
-    pub act: u32,
-    pub scope_char_start: u32,
-    pub scope_char_end: u32,
-    pub doc_char_start: u32,
-    pub doc_char_end: u32,
-    pub paragraphs: Vec<ParagraphIndexEntry>,
-}
-
-/// Structural index mapping scope-local and document offsets to act/paragraph segments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScopeManifest {
-    pub chapter: u32,
-    pub acts: Vec<ActSegment>,
-}
-
-/// Resolved location for an edit span within chapter structure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpanLocation {
-    pub chapter: u32,
-    pub act: u32,
-    pub paragraph_index: u32,
-    pub segment_id: String,
-    /// 1-based sentence index within the paragraph segment.
-    pub sentence_index: u32,
-    pub scope_char_start: u32,
-    pub scope_char_end: u32,
-    pub doc_char_start: u32,
-    pub doc_char_end: u32,
-}
+/// JSON contract alias for [`ParagraphSpan`].
+pub type ParagraphIndexEntry = ParagraphSpan;
 
 /// Document span with structural location — v1 [`EditSpan`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -149,11 +75,6 @@ pub struct AnalysisOutput {
     pub scope_manifest: ScopeManifest,
     pub passes: Vec<AnalysisPassRecord>,
     pub merged_repetition_report: RepetitionReportV1,
-}
-
-/// Format a segment id: `ch01_a02_p03`.
-pub fn format_segment_id(chapter: u32, act: u32, paragraph_index: u32) -> String {
-    format!("ch{chapter:02}_a{act:02}_p{paragraph_index:02}")
 }
 
 /// Build a scope manifest from chapter text split into acts (blocks separated by `\n\n`).
@@ -217,7 +138,7 @@ pub fn build_scope_manifest(
             para_num += 1;
             let para_len = trimmed.len() as u32;
             let para_scope_start = act_scope_start + para_offset as u32;
-            paragraphs.push(ParagraphIndexEntry {
+            paragraphs.push(ParagraphSpan {
                 paragraph_index: para_num,
                 segment_id: format_segment_id(chapter, act_num, para_num),
                 scope_char_start: para_scope_start,
@@ -228,7 +149,7 @@ pub fn build_scope_manifest(
             offset_in_act += line.len() + 1;
         }
 
-        acts.push(ActSegment {
+        acts.push(ScopeSegment {
             act: act_num,
             scope_char_start: act_scope_start,
             scope_char_end: act_scope_end,
@@ -292,7 +213,7 @@ pub fn resolve_span_location(
 fn sentence_index_in_paragraph(
     paragraph_text: &str,
     doc_char_start: u32,
-    para: &ParagraphIndexEntry,
+    para: &ParagraphSpan,
 ) -> u32 {
     let local_start = doc_char_start.saturating_sub(para.doc_char_start) as usize;
     let before = &paragraph_text[..local_start.min(paragraph_text.len())];
@@ -342,21 +263,15 @@ fn cluster_summary_to_v1(
     });
     let duplicates: Vec<EditSpanV1> = spans.iter().skip(1).cloned().collect();
 
-    let acts: std::collections::HashSet<u32> = spans.iter().map(|s| s.location.act).collect();
-    let cross_act = acts.len() > 1;
-    let needs_bridge = cross_act
-        && spans
-            .iter()
-            .any(|s| s.similarity_to_centroid >= 0.85);
-
-    let suggested_op = if needs_bridge {
-        SuggestedOp::Bridge
-    } else if cross_act {
-        SuggestedOp::Rewrite
-    } else if duplicates.iter().all(|d| d.similarity_to_centroid >= 0.95) {
-        SuggestedOp::Remove
+    let (cross_act, needs_bridge, suggested_op) = if cluster.spans.iter().any(|s| s.location.is_some())
+    {
+        derive_cluster_enrichments(&cluster.spans)
     } else {
-        SuggestedOp::Rewrite
+        (
+            cluster.cross_act,
+            cluster.needs_bridge,
+            cluster.suggested_op,
+        )
     };
 
     ClusterSummaryV1 {
@@ -379,13 +294,15 @@ fn edit_span_to_v1(
     scope_base_doc: u32,
     chapter_text: &str,
 ) -> EditSpanV1 {
-    let location = resolve_span_location(
-        manifest,
-        scope_base_doc,
-        span.doc_char_start,
-        span.doc_char_end,
-        chapter_text,
-    );
+    let location = span.location.clone().unwrap_or_else(|| {
+        resolve_span_location(
+            manifest,
+            scope_base_doc,
+            span.doc_char_start,
+            span.doc_char_end,
+            chapter_text,
+        )
+    });
     EditSpanV1 {
         location,
         cluster_id: span.cluster_id,
@@ -638,11 +555,6 @@ pub fn validate_analysis_output(output: &AnalysisOutput) -> Result<(), ContractE
 mod tests {
     use super::*;
     use crate::report::build_repetition_report;
-
-    #[test]
-    fn format_segment_id_zero_pads() {
-        assert_eq!(format_segment_id(3, 2, 7), "ch03_a02_p07");
-    }
 
     #[test]
     fn scope_manifest_builds_act_paragraph_index() {

@@ -9,6 +9,129 @@ use crate::spans::{expand_to_sentence_boundaries, merge_overlapping_spans};
 use crate::storage::{Storage, StorageError};
 use crate::types::{AppError, ClusterRegistry, Page, SessionError};
 
+/// Current repetition report schema version string.
+pub const SCHEMA_VERSION: &str = "1";
+
+/// Editorial operation suggested for a repetition cluster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuggestedOp {
+    /// Keep the canonical instance; no edit required on duplicates beyond optional polish.
+    Keep,
+    /// Rewrite duplicate instances in place.
+    Rewrite,
+    /// Remove duplicate instances (same-act near-exact echo).
+    Remove,
+    /// Insert transitional bridge prose between acts before rewriting.
+    Bridge,
+}
+
+fn default_suggested_op() -> SuggestedOp {
+    SuggestedOp::Rewrite
+}
+
+/// What manuscript unit this analysis covers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisScope {
+    /// 1-based chapter number within the story.
+    pub chapter: u32,
+    /// 1-based act when the pass targets a single act; omitted for whole-chapter scope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub act: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_hash: Option<String>,
+    /// Character range of this scope within the chapter text (inclusive start, exclusive end).
+    pub scope_char_start: u32,
+    pub scope_char_end: u32,
+    /// Absolute document offsets for the same range.
+    pub doc_char_start: u32,
+    pub doc_char_end: u32,
+}
+
+/// Analysis tuning parameters recorded on an enriched repetition report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReportAnalysisParams {
+    pub window_size: u32,
+    pub stride: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_per_page: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_break_regex: Option<String>,
+    pub min_repetitions: u32,
+    pub min_samples: u32,
+    pub enable_hdbscan: bool,
+    pub link_subphrases: bool,
+}
+
+impl From<crate::analysis::AnalysisParams> for ReportAnalysisParams {
+    fn from(params: crate::analysis::AnalysisParams) -> Self {
+        Self {
+            window_size: params.window_size,
+            stride: params.stride,
+            tokens_per_page: params.tokens_per_page,
+            chapter_break_regex: params.chapter_break_regex,
+            min_repetitions: params.min_repetitions,
+            min_samples: params.min_samples,
+            enable_hdbscan: params.enable_hdbscan,
+            link_subphrases: params.link_subphrases,
+        }
+    }
+}
+
+/// One paragraph entry in the nested act index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParagraphSpan {
+    /// 1-based paragraph index within the act.
+    pub paragraph_index: u32,
+    /// Stable segment id: `ch{NN}_a{MM}_p{PP}` (zero-padded).
+    pub segment_id: String,
+    pub scope_char_start: u32,
+    pub scope_char_end: u32,
+    pub doc_char_start: u32,
+    pub doc_char_end: u32,
+}
+
+/// One act segment with nested paragraph index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeSegment {
+    /// 1-based act number within the chapter.
+    pub act: u32,
+    pub scope_char_start: u32,
+    pub scope_char_end: u32,
+    pub doc_char_start: u32,
+    pub doc_char_end: u32,
+    pub paragraphs: Vec<ParagraphSpan>,
+}
+
+/// Structural index mapping scope-local and document offsets to act/paragraph segments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScopeManifest {
+    pub chapter: u32,
+    pub acts: Vec<ScopeSegment>,
+}
+
+/// Resolved location for an edit span within chapter structure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpanLocation {
+    pub chapter: u32,
+    pub act: u32,
+    pub paragraph_index: u32,
+    pub segment_id: String,
+    /// 1-based sentence index within the paragraph segment.
+    pub sentence_index: u32,
+    pub scope_char_start: u32,
+    pub scope_char_end: u32,
+    pub doc_char_start: u32,
+    pub doc_char_end: u32,
+}
+
+/// Format a segment id: `ch01_a02_p03`.
+pub fn format_segment_id(chapter: u32, act: u32, paragraph_index: u32) -> String {
+    format!("ch{chapter:02}_a{act:02}_p{paragraph_index:02}")
+}
+
 /// A document span suitable for surgical text editing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EditSpan {
@@ -20,6 +143,8 @@ pub struct EditSpan {
     pub text: String,
     pub similarity_to_centroid: f32,
     pub member_window_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<SpanLocation>,
 }
 
 /// Summary of one repetition cluster with canonical + duplicate instances.
@@ -35,6 +160,12 @@ pub struct ClusterSummary {
     pub duplicates: Vec<EditSpan>,
     /// All merged instances in document order (canonical + duplicates).
     pub spans: Vec<EditSpan>,
+    #[serde(default)]
+    pub cross_act: bool,
+    #[serde(default = "default_suggested_op")]
+    pub suggested_op: SuggestedOp,
+    #[serde(default)]
+    pub needs_bridge: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,11 +181,44 @@ pub struct RepetitionReport {
     pub job_id: String,
     pub clusters: Vec<ClusterSummary>,
     pub stats: AnalysisStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AnalysisScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_params: Option<ReportAnalysisParams>,
 }
 
 /// Reconstruct full document text from paginated import output.
 pub fn pages_to_document_text(pages: &[Page]) -> String {
     pages.iter().map(|p| p.text.as_str()).collect()
+}
+
+/// Derive cluster editorial enrichments from span locations and similarities.
+pub fn derive_cluster_enrichments(spans: &[EditSpan]) -> (bool, bool, SuggestedOp) {
+    let acts: std::collections::HashSet<u32> = spans
+        .iter()
+        .filter_map(|span| span.location.as_ref().map(|loc| loc.act))
+        .collect();
+    let cross_act = acts.len() > 1;
+    let needs_bridge = cross_act
+        && spans
+            .iter()
+            .any(|span| span.similarity_to_centroid >= 0.85);
+    let duplicates: Vec<&EditSpan> = spans.iter().skip(1).collect();
+    let suggested_op = if needs_bridge {
+        SuggestedOp::Bridge
+    } else if cross_act {
+        SuggestedOp::Rewrite
+    } else if duplicates
+        .iter()
+        .all(|span| span.similarity_to_centroid >= 0.95)
+    {
+        SuggestedOp::Remove
+    } else {
+        SuggestedOp::Rewrite
+    };
+    (cross_act, needs_bridge, suggested_op)
 }
 
 /// Build an editorial repetition report from clustered window data.
@@ -128,6 +292,7 @@ pub fn build_repetition_report_from_registry(
                         text,
                         similarity_to_centroid: similarity,
                         member_window_count: span.member_window_count,
+                        location: None,
                     }
                 })
                 .collect();
@@ -148,6 +313,7 @@ pub fn build_repetition_report_from_registry(
                 .iter()
                 .map(|s| s.text.split_whitespace().count() as u32)
                 .sum();
+            let (cross_act, needs_bridge, suggested_op) = derive_cluster_enrichments(&edit_spans);
 
             Some(ClusterSummary {
                 cluster_id: info.cluster_id,
@@ -157,6 +323,9 @@ pub fn build_repetition_report_from_registry(
                 canonical,
                 duplicates,
                 spans: edit_spans,
+                cross_act,
+                suggested_op,
+                needs_bridge,
             })
         })
         .collect();
@@ -178,6 +347,9 @@ pub fn build_repetition_report_from_registry(
             total_duplicate_instances,
             total_duplicate_words_estimate,
         },
+        schema_version: None,
+        scope: None,
+        analysis_params: None,
     }
 }
 
@@ -270,6 +442,219 @@ mod tests {
         }
     }
 
+    fn sample_span_location() -> SpanLocation {
+        SpanLocation {
+            chapter: 1,
+            act: 1,
+            paragraph_index: 1,
+            segment_id: "ch01_a01_p01".to_string(),
+            sentence_index: 1,
+            scope_char_start: 12,
+            scope_char_end: 38,
+            doc_char_start: 12,
+            doc_char_end: 38,
+        }
+    }
+
+    fn sample_scope_manifest() -> ScopeManifest {
+        ScopeManifest {
+            chapter: 1,
+            acts: vec![ScopeSegment {
+                act: 1,
+                scope_char_start: 0,
+                scope_char_end: 198,
+                doc_char_start: 0,
+                doc_char_end: 198,
+                paragraphs: vec![ParagraphSpan {
+                    paragraph_index: 1,
+                    segment_id: "ch01_a01_p01".to_string(),
+                    scope_char_start: 0,
+                    scope_char_end: 95,
+                    doc_char_start: 0,
+                    doc_char_end: 95,
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn format_segment_id_zero_pads() {
+        assert_eq!(format_segment_id(3, 2, 7), "ch03_a02_p07");
+    }
+
+    #[test]
+    fn scope_manifest_roundtrip_json() {
+        let manifest = sample_scope_manifest();
+        let json = serde_json::to_string(&manifest).unwrap();
+        let parsed: ScopeManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, manifest);
+        assert_eq!(parsed.acts[0].paragraphs[0].segment_id, "ch01_a01_p01");
+    }
+
+    #[test]
+    fn span_location_roundtrip_json() {
+        let location = sample_span_location();
+        let json = serde_json::to_string(&location).unwrap();
+        let parsed: SpanLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, location);
+    }
+
+    #[test]
+    fn edit_span_roundtrip_json_with_optional_location() {
+        let span = EditSpan {
+            cluster_id: 1,
+            instance_id: 1,
+            doc_char_start: 12,
+            doc_char_end: 38,
+            text: "the velvet darkness pooled".to_string(),
+            similarity_to_centroid: 1.0,
+            member_window_count: 3,
+            location: Some(sample_span_location()),
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        let parsed: EditSpan = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, span);
+        assert!(parsed.location.is_some());
+    }
+
+    #[test]
+    fn edit_span_roundtrip_json_without_location() {
+        let span = EditSpan {
+            cluster_id: 1,
+            instance_id: 1,
+            doc_char_start: 0,
+            doc_char_end: 17,
+            text: "Alpha block here.".to_string(),
+            similarity_to_centroid: 1.0,
+            member_window_count: 1,
+            location: None,
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(!json.contains("location"));
+        let parsed: EditSpan = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, span);
+    }
+
+    #[test]
+    fn cluster_summary_roundtrip_json() {
+        let canonical = EditSpan {
+            cluster_id: 1,
+            instance_id: 1,
+            doc_char_start: 12,
+            doc_char_end: 38,
+            text: "the velvet darkness pooled".to_string(),
+            similarity_to_centroid: 1.0,
+            member_window_count: 3,
+            location: Some(sample_span_location()),
+        };
+        let duplicate = EditSpan {
+            cluster_id: 1,
+            instance_id: 2,
+            doc_char_start: 110,
+            doc_char_end: 136,
+            text: "the velvet darkness pooled".to_string(),
+            similarity_to_centroid: 0.97,
+            member_window_count: 2,
+            location: Some(SpanLocation {
+                paragraph_index: 2,
+                segment_id: "ch01_a01_p02".to_string(),
+                ..sample_span_location()
+            }),
+        };
+        let cluster = ClusterSummary {
+            cluster_id: 1,
+            representative_text: "the velvet darkness pooled".to_string(),
+            instance_count: 2,
+            total_word_estimate: 8,
+            canonical: canonical.clone(),
+            duplicates: vec![duplicate.clone()],
+            spans: vec![canonical, duplicate],
+            cross_act: false,
+            suggested_op: SuggestedOp::Remove,
+            needs_bridge: false,
+        };
+        let json = serde_json::to_string(&cluster).unwrap();
+        let parsed: ClusterSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cluster);
+        assert_eq!(parsed.suggested_op, SuggestedOp::Remove);
+    }
+
+    #[test]
+    fn repetition_report_roundtrip_json() {
+        let report = RepetitionReport {
+            job_id: "job-1".to_string(),
+            clusters: vec![],
+            stats: AnalysisStats {
+                cluster_count: 0,
+                total_duplicate_instances: 0,
+                total_duplicate_words_estimate: 0,
+            },
+            schema_version: Some(SCHEMA_VERSION.to_string()),
+            scope: Some(AnalysisScope {
+                chapter: 1,
+                act: None,
+                document_path: Some("stories/x/drafts/chapter_01.md".to_string()),
+                document_hash: None,
+                scope_char_start: 0,
+                scope_char_end: 512,
+                doc_char_start: 0,
+                doc_char_end: 512,
+            }),
+            analysis_params: Some(ReportAnalysisParams {
+                window_size: 50,
+                stride: 10,
+                tokens_per_page: Some(400),
+                chapter_break_regex: None,
+                min_repetitions: 3,
+                min_samples: 3,
+                enable_hdbscan: true,
+                link_subphrases: false,
+            }),
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: RepetitionReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, report);
+        assert_eq!(parsed.schema_version.as_deref(), Some(SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn derive_cluster_enrichments_cross_act_bridge() {
+        let spans = vec![
+            EditSpan {
+                cluster_id: 1,
+                instance_id: 1,
+                doc_char_start: 0,
+                doc_char_end: 10,
+                text: "first".to_string(),
+                similarity_to_centroid: 1.0,
+                member_window_count: 1,
+                location: Some(SpanLocation {
+                    act: 1,
+                    ..sample_span_location()
+                }),
+            },
+            EditSpan {
+                cluster_id: 1,
+                instance_id: 2,
+                doc_char_start: 100,
+                doc_char_end: 110,
+                text: "second".to_string(),
+                similarity_to_centroid: 0.9,
+                member_window_count: 1,
+                location: Some(SpanLocation {
+                    act: 2,
+                    paragraph_index: 1,
+                    segment_id: "ch01_a02_p01".to_string(),
+                    ..sample_span_location()
+                }),
+            },
+        ];
+        let (cross_act, needs_bridge, suggested_op) = derive_cluster_enrichments(&spans);
+        assert!(cross_act);
+        assert!(needs_bridge);
+        assert_eq!(suggested_op, SuggestedOp::Bridge);
+    }
+
     #[test]
     fn report_splits_canonical_and_duplicates() {
         let doc = "Alpha block here. Beta block here. Gamma block here.";
@@ -308,5 +693,9 @@ mod tests {
         assert_eq!(cluster.duplicates[0].text, "Beta block here.");
         assert_eq!(cluster.duplicates[1].text, "Gamma block here.");
         assert_eq!(report.stats.total_duplicate_instances, 2);
+        assert!(!cluster.cross_act);
+        assert_eq!(cluster.suggested_op, SuggestedOp::Remove);
+        assert!(cluster.canonical.location.is_none());
+        assert!(report.schema_version.is_none());
     }
 }
