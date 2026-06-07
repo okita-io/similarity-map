@@ -766,16 +766,16 @@ pub async fn analyze_text(
     enable_hdbscan: Option<bool>,
     link_subphrases: Option<bool>,
 ) -> Result<similarity_core::VisualizationPayload, AppError> {
-    use similarity_core::load_visualization_payload;
-    use similarity_core::storage::Storage;
-    use similarity_core::{DEFAULT_GAMMA, DEFAULT_TOLERANCE};
-    use std::io::Write;
+    use similarity_core::build_scope_manifest;
+    use similarity_core::{
+        AnalysisInput, AnalyzeProseOptions, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
+    };
 
     let params = similarity_core::AnalysisParams {
         window_size,
         stride,
         tokens_per_page,
-        chapter_break_regex: chapter_break_regex.clone(),
+        chapter_break_regex,
         min_repetitions,
         min_samples,
         enable_hdbscan: enable_hdbscan.unwrap_or(true),
@@ -789,13 +789,9 @@ pub async fn analyze_text(
         })
     })?;
 
-    let pasted_dir = app_data_dir.join("pasted");
-    std::fs::create_dir_all(&pasted_dir).map_err(|e| {
-        AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to create pasted text directory: {}", e),
-        })
-    })?;
-
+    let model_path = model::model_path(&app_data_dir);
+    let scope_manifest = build_scope_manifest(1, &text, 0);
+    let text_len = text.len() as u32;
     let slug = label
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -805,51 +801,40 @@ pub async fn analyze_text(
                 .collect::<String>()
         })
         .unwrap_or_else(|| "paste".to_string());
-    let file_name = format!("{}_{}.md", slug, uuid::Uuid::new_v4());
-    let file_path = pasted_dir.join(&file_name);
-    {
-        let mut file = std::fs::File::create(&file_path).map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to write pasted text: {}", e),
-            })
-        })?;
-        file.write_all(text.as_bytes()).map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to write pasted text: {}", e),
-            })
-        })?;
-    }
 
-    let path_str = file_path.to_string_lossy().to_string();
-    let config = PipelineConfig {
-        path: path_str,
-        window_size,
-        stride,
-        tokens_per_page,
-        chapter_break_regex,
-        min_repetitions,
-        min_samples,
-        enable_hdbscan: enable_hdbscan.unwrap_or(true),
-        link_subphrases: link_subphrases.unwrap_or(false),
+    let mut options = AnalyzeProseOptions::chapter_pass(1, window_size, stride);
+    options.job_id = Some(format!("paste_{}", slug));
+    options.include_visualization = true;
+    options.tolerance = DEFAULT_TOLERANCE;
+    options.gamma = DEFAULT_GAMMA;
+    options.scope.scope_char_end = text_len;
+    options.scope.doc_char_end = text_len;
+    options.scope.document_path = Some(format!("pasted:{slug}"));
+
+    let input = AnalysisInput {
+        text,
+        scope_manifest,
+        params,
     };
 
-    let handle = pipeline::run_pipeline(config, app_handle.clone()).await?;
+    let result = similarity_core::analyze_prose_with_model(&input, &options, &model_path)?;
 
-    let db_path = app_data_dir.join("similarity_map_db");
-    let store = Storage::open(&db_path).await.map_err(|e| {
-        AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to open storage: {}", e),
+    crate::log_info!(
+        app_handle,
+        "command",
+        "analyze_text complete: job_id={} clusters={}",
+        result.output.merged_repetition_report.job_id,
+        result.output.merged_repetition_report.stats.cluster_count
+    );
+
+    result
+        .visualization
+        .ok_or_else(|| {
+            AppError::Validation(similarity_core::types::ValidationError {
+                field: "visualization".into(),
+                message: "analyze_prose did not produce a visualization payload".into(),
+            })
         })
-    })?;
-
-    load_visualization_payload(
-        &store,
-        &handle.job_id,
-        DEFAULT_TOLERANCE,
-        DEFAULT_GAMMA,
-        true,
-    )
-    .await
 }
 
 /// Persists display state (tolerance, gamma, hidden clusters, zoom, scroll).
