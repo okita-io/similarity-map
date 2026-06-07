@@ -41,6 +41,7 @@ pub fn run() {
             save_document_result_as,
             delete_document_result,
             set_active_document_result,
+            serialize_analysis_output,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
