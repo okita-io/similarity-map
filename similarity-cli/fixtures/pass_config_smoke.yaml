@@ -1,0 +1,11 @@
+# Minimal single-pass config for CLI smoke tests.
+min_repetitions: 2
+min_samples: 2
+enable_hdbscan: false
+link_subphrases: false
+expand_to_sentences: true
+passes:
+  - name: chapter_5_5
+    scope: chapter
+    window_size: 5
+    stride: 5
