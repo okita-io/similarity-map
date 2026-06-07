@@ -258,6 +258,51 @@ cargo run -p similarity-cli -- analyze \
 
 **Production runs** require the `all-MiniLM-L6-v2` ONNX model (same as the desktop app). Point `--model-path` at the cached file or set `SIMILARITY_MAP_DATA_DIR` / `SIMILARITY_MAP_MODEL_PATH`.
 
+### PyO3 Python bindings (`similarity-core-py`)
+
+Direct pipeline integration without Tauri or subprocess CLI:
+
+```bash
+cd similarity-map/similarity-core-py
+pip install maturin   # once
+maturin develop       # builds and installs editable `similarity_core` package
+```
+
+```python
+import similarity_core
+
+result = similarity_core.analyze_prose(
+    text,
+    scope_manifest,   # dict — act/paragraph index from build_scope_manifest
+    params,             # dict — window_size, stride, min_repetitions, …
+    test_embedder=True, # omit in production; uses ONNX model
+)
+# result is AnalysisOutput v1 (JSON-serializable dict)
+
+result = similarity_core.analyze_prose_multi_pass(
+    text,
+    scope_manifest,
+    pass_config,        # dict — MultiPassConfig (passes[], min_repetitions, …)
+    test_embedder=True,
+)
+```
+
+**Model path resolution** (production ONNX runs):
+
+| Env var | Effect |
+|---|---|
+| `SIMILARITY_MAP_MODEL_PATH` | Full path to `all-MiniLM-L6-v2.onnx` |
+| `SIMILARITY_MAP_MODEL_DIR` | Directory containing the model (or `models/` subdir) |
+| `SIMILARITY_MAP_DATA_DIR` | App-data root (default: `~/Library/Application Support` on macOS) |
+
+Tests (offline, no ONNX):
+
+```bash
+cd similarity-map/similarity-core-py
+maturin develop
+pytest tests/test_analyze_prose.py -v
+```
+
 
 ## License
 
