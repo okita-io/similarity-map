@@ -10,6 +10,7 @@ pub mod embedding;
 pub mod hash;
 pub mod importer;
 pub mod model;
+pub mod multi_pass;
 pub mod ort_runtime;
 pub mod rasterizer;
 pub mod report;
@@ -28,6 +29,11 @@ pub use analyze_prose::{
     run_analysis_stages_from_pages, run_clustering_stages_from_embeddings, AnalysisArtifacts,
     AnalysisInput, AnalyzeProseOptions, AnalyzeProseResult, DeterministicTestEmbedder,
     TextEmbedder,
+};
+pub use multi_pass::{
+    analyze_prose_multi_pass, cluster_blast_radius_words, default_rf_multi_pass_config,
+    suggested_op_for_merged_cluster, MultiPassConfig, MultiPassInput, MultiPassResult, PassScope,
+    PassSpec,
 };
 pub use importer::{import_document, paginate_scope, ImportDocumentParams};
 pub use visualization::{

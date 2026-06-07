@@ -397,6 +397,7 @@ fn merge_cluster_summaries(existing: &mut ClusterSummaryV1, incoming: &ClusterSu
 }
 
 fn recompute_cluster_enrichments(cluster: &mut ClusterSummaryV1) {
+    cluster.suggested_op = crate::multi_pass::suggested_op_for_merged_cluster(cluster);
     let acts: std::collections::HashSet<u32> =
         cluster.spans.iter().map(|s| s.location.act).collect();
     cluster.cross_act = acts.len() > 1;
@@ -405,19 +406,6 @@ fn recompute_cluster_enrichments(cluster: &mut ClusterSummaryV1) {
             .spans
             .iter()
             .any(|s| s.similarity_to_centroid >= 0.85);
-    cluster.suggested_op = if cluster.needs_bridge {
-        SuggestedOp::Bridge
-    } else if cluster.cross_act {
-        SuggestedOp::Rewrite
-    } else if cluster
-        .duplicates
-        .iter()
-        .all(|d| d.similarity_to_centroid >= 0.95)
-    {
-        SuggestedOp::Remove
-    } else {
-        SuggestedOp::Rewrite
-    };
 }
 
 /// Assemble a full [`AnalysisOutput`] from pass records and chapter text.

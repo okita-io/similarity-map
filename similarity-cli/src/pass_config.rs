@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use similarity_core::AnalysisParams;
+use similarity_core::{AnalysisParams, MultiPassConfig, PassScope, PassSpec};
 
 /// Multi-pass bundle mirroring Romance Factory `settings.yaml` `generate:similarity_map:`.
 #[derive(Debug, Clone, Deserialize)]
@@ -14,6 +14,8 @@ pub struct PassConfigFile {
     pub link_subphrases: bool,
     #[serde(default = "default_true")]
     pub expand_to_sentences: bool,
+    #[serde(default = "default_tokens_per_page")]
+    pub tokens_per_page: u32,
     pub passes: Vec<PassEntry>,
 }
 
@@ -23,13 +25,6 @@ pub struct PassEntry {
     pub scope: PassScope,
     pub window_size: u32,
     pub stride: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PassScope {
-    Act,
-    Chapter,
 }
 
 fn default_min_repetitions() -> u32 {
@@ -44,6 +39,33 @@ fn default_true() -> bool {
     true
 }
 
+fn default_tokens_per_page() -> u32 {
+    400
+}
+
+impl From<PassConfigFile> for MultiPassConfig {
+    fn from(file: PassConfigFile) -> Self {
+        MultiPassConfig {
+            min_repetitions: file.min_repetitions,
+            min_samples: file.min_samples,
+            enable_hdbscan: file.enable_hdbscan,
+            link_subphrases: file.link_subphrases,
+            expand_to_sentences: file.expand_to_sentences,
+            tokens_per_page: file.tokens_per_page,
+            passes: file
+                .passes
+                .into_iter()
+                .map(|p| PassSpec {
+                    name: p.name,
+                    scope: p.scope,
+                    window_size: p.window_size,
+                    stride: p.stride,
+                })
+                .collect(),
+        }
+    }
+}
+
 impl PassConfigFile {
     pub fn from_yaml_path(path: &std::path::Path) -> Result<Self, String> {
         let raw = std::fs::read_to_string(path)
@@ -52,61 +74,17 @@ impl PassConfigFile {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.passes.is_empty() {
-            return Err("pass config must contain at least one pass".into());
-        }
-        if !(2..=20).contains(&self.min_repetitions) {
-            return Err(format!(
-                "min_repetitions must be in [2, 20], got {}",
-                self.min_repetitions
-            ));
-        }
-        if !(1..=10).contains(&self.min_samples) {
-            return Err(format!(
-                "min_samples must be in [1, 10], got {}",
-                self.min_samples
-            ));
-        }
-        let mut seen = std::collections::HashSet::new();
-        for (i, pass) in self.passes.iter().enumerate() {
-            if pass.name.trim().is_empty() {
-                return Err(format!("passes[{i}].name must be non-empty"));
-            }
-            if !(5..=1500).contains(&pass.window_size) {
-                return Err(format!(
-                    "passes[{i}].window_size must be in [5, 1500], got {}",
-                    pass.window_size
-                ));
-            }
-            if !(1..=200).contains(&pass.stride) {
-                return Err(format!(
-                    "passes[{i}].stride must be in [1, 200], got {}",
-                    pass.stride
-                ));
-            }
-            if pass.stride > pass.window_size {
-                return Err(format!(
-                    "passes[{i}].stride ({}) must be <= window_size ({})",
-                    pass.stride, pass.window_size
-                ));
-            }
-            if !seen.insert(pass.name.clone()) {
-                return Err(format!("duplicate pass name {:?}", pass.name));
-            }
-        }
-        Ok(())
+        let config: MultiPassConfig = self.clone().into();
+        config.validate().map_err(|e| e.to_string())
     }
 
     pub fn to_analysis_params(&self, pass: &PassEntry) -> AnalysisParams {
-        AnalysisParams {
+        let config: MultiPassConfig = self.clone().into();
+        config.to_analysis_params(&PassSpec {
+            name: pass.name.clone(),
+            scope: pass.scope,
             window_size: pass.window_size,
             stride: pass.stride,
-            tokens_per_page: None,
-            chapter_break_regex: None,
-            min_repetitions: self.min_repetitions,
-            min_samples: self.min_samples,
-            enable_hdbscan: self.enable_hdbscan,
-            link_subphrases: self.link_subphrases,
-        }
+        })
     }
 }

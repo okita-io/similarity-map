@@ -55,8 +55,11 @@ Legacy `RepetitionReport` spans (doc offsets only) upgrade via `repetition_repor
 
 1. **`bridge`** — `needs_bridge == true`
 2. **`rewrite`** — `cross_act == true` (without bridge threshold)
-3. **`remove`** — same-act duplicates with all `similarity_to_centroid ≥ 0.95`
-4. **`rewrite`** — default for remaining same-act fuzzy echoes
+3. **`rewrite`** — same-act cluster with blast radius > 50 words (coarse chapter-pass echoes)
+4. **`remove`** — same-act duplicates with all `similarity_to_centroid ≥ 0.95` and blast radius ≤ 15 words
+5. **`rewrite`** — default for remaining same-act fuzzy echoes
+
+Blast radius is the max whitespace-delimited word count across cluster spans (`cluster_blast_radius_words`).
 
 ## Multi-pass merge rules
 
@@ -108,6 +111,8 @@ use similarity_core::{
 ```
 
 Headless entry point (no Tauri / LanceDB): `analyze_prose(input, options, embedder)` runs paginate → window → embed → cluster → report in memory and returns contract v1 `AnalysisOutput`. Use `DeterministicTestEmbedder` in unit tests without ONNX.
+
+Multi-pass orchestration: `analyze_prose_multi_pass(MultiPassInput, embedder)` runs the default RF 4-pass bundle (`default_rf_multi_pass_config()`) — act-scoped passes per act, chapter-scoped passes on the full chapter — then merges via `merge_pass_reports`.
 
 ## Related tasks
 

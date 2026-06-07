@@ -4,6 +4,7 @@ min_samples: 2
 enable_hdbscan: false
 link_subphrases: false
 expand_to_sentences: true
+tokens_per_page: 400
 passes:
   - name: chapter_5_5
     scope: chapter
