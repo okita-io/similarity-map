@@ -248,6 +248,58 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 16px;
+}
+
+.import-rf-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.btn-rf-story {
+  width: 100%;
+}
+
+.import-rf-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-rf-story-name {
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.setting-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.text-act-boundary {
+  margin: 10px 0 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+}
+
+#grid-container canvas.grid-act-page {
+  outline: 1px solid rgba(120, 180, 255, 0.45);
+  outline-offset: -1px;
 }
 
 .btn-open-file {

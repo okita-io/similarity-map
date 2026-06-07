@@ -26,6 +26,13 @@ export class ImportSettingsPanel {
     this.filePath = options.filePath || "";
     this.isPdf = options.isPdf || false;
 
+    /** @type {string|null} Romance Factory story directory path */
+    this.rfStoryPath = null;
+    /** @type {number|null} Selected RF chapter number */
+    this.rfChapter = null;
+    /** @type {number[]} */
+    this._rfChapters = [];
+
     // Track whether user has manually overridden stride
     this._strideManuallySet = false;
 
@@ -72,6 +79,24 @@ export class ImportSettingsPanel {
             <span class="btn-open-file-text">Open Document</span>
           </button>
           <div class="import-file-name" id="import-file-name"></div>
+        </div>
+
+        <div class="import-rf-section">
+          <button id="btn-load-rf-story" class="btn-open-file btn-rf-story" type="button">
+            <span class="btn-open-file-icon" aria-hidden="true">📁</span>
+            <span class="btn-open-file-text">Load RF Story</span>
+          </button>
+          <div class="import-rf-meta" id="import-rf-meta" hidden>
+            <div class="import-rf-story-name" id="import-rf-story-name"></div>
+            <label class="setting-label" for="select-rf-chapter">Chapter</label>
+            <select id="select-rf-chapter" class="setting-select" aria-label="RF chapter">
+              <option value="">Select chapter…</option>
+            </select>
+            <div class="import-rf-scope-note setting-note" id="import-rf-scope-note"></div>
+            <button id="btn-analyze-rf-chapter" class="btn-secondary" type="button" disabled>
+              Analyze RF Chapter
+            </button>
+          </div>
         </div>
 
         <div class="import-settings-controls">
@@ -315,6 +340,12 @@ export class ImportSettingsPanel {
       estimateTime: this.container.querySelector("#estimate-time"),
       estimateNudge: this.container.querySelector("#estimate-nudge"),
       btnAnalyze: this.container.querySelector("#btn-analyze"),
+      btnLoadRfStory: this.container.querySelector("#btn-load-rf-story"),
+      rfMeta: this.container.querySelector("#import-rf-meta"),
+      rfStoryName: this.container.querySelector("#import-rf-story-name"),
+      rfChapterSelect: this.container.querySelector("#select-rf-chapter"),
+      rfScopeNote: this.container.querySelector("#import-rf-scope-note"),
+      btnAnalyzeRfChapter: this.container.querySelector("#btn-analyze-rf-chapter"),
       pasteTextArea: this.container.querySelector("#paste-text-area"),
       btnAnalyzeText: this.container.querySelector("#btn-analyze-text"),
     };
@@ -388,9 +419,190 @@ export class ImportSettingsPanel {
       this._startAnalysis();
     });
 
+    this._els.btnLoadRfStory.addEventListener("click", () => {
+      void this._openRfStoryDialog();
+    });
+
+    this._els.rfChapterSelect.addEventListener("change", () => {
+      void this._onRfChapterSelected();
+    });
+
+    this._els.btnAnalyzeRfChapter.addEventListener("click", () => {
+      void this._startRfChapterAnalysis();
+    });
+
     this._els.btnAnalyzeText.addEventListener("click", () => {
       this._startTextAnalysis();
     });
+  }
+
+  /** Open a native folder picker for a Romance Factory story directory. */
+  async _openRfStoryDialog() {
+    const dialogOptions = {
+      multiple: false,
+      directory: true,
+      title: "Load Romance Factory Story",
+    };
+
+    try {
+      const openDialog =
+        window.__TAURI__?.dialog?.open ??
+        (window.__TAURI_INTERNALS__?.invoke
+          ? (opts) =>
+              window.__TAURI_INTERNALS__.invoke("plugin:dialog|open", {
+                options: opts,
+              })
+          : null);
+
+      if (!openDialog) {
+        console.warn("Tauri dialog API not available");
+        return;
+      }
+
+      const selected = await openDialog(dialogOptions);
+      if (!selected) return;
+
+      const storyPath = typeof selected === "string" ? selected : selected.path;
+      if (!storyPath) return;
+
+      await this._setRfStory(storyPath);
+    } catch (err) {
+      console.error("RF story dialog failed:", err);
+      this._showAnalysisError(err);
+    }
+  }
+
+  /**
+   * @param {string} storyPath
+   */
+  async _setRfStory(storyPath) {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    this.rfStoryPath = storyPath;
+    this.rfChapter = null;
+    this._rfChapters = [];
+
+    const storyName = storyPath.split(/[/\\]/).pop() || storyPath;
+    this._els.rfStoryName.textContent = storyName;
+    this._els.rfStoryName.title = storyPath;
+    this._els.rfMeta.hidden = false;
+    this._els.rfScopeNote.textContent = "";
+    this._els.btnAnalyzeRfChapter.disabled = true;
+
+    const select = this._els.rfChapterSelect;
+    select.innerHTML = '<option value="">Select chapter…</option>';
+
+    try {
+      const list = await invoke("list_rf_chapters", { storyPath });
+      this._rfChapters = list?.chapters || [];
+      for (const ch of this._rfChapters) {
+        const opt = document.createElement("option");
+        opt.value = String(ch);
+        opt.textContent = `Chapter ${ch}`;
+        select.appendChild(opt);
+      }
+      if (this._rfChapters.length === 0) {
+        this._els.rfScopeNote.textContent =
+          "No chapters found — add drafts/chapter_XX_act_YY.json files.";
+      }
+    } catch (err) {
+      console.error("list_rf_chapters failed:", err);
+      this._showAnalysisError(err);
+    }
+  }
+
+  async _onRfChapterSelected() {
+    const raw = this._els.rfChapterSelect.value;
+    if (!raw || !this.rfStoryPath) {
+      this.rfChapter = null;
+      this._els.rfScopeNote.textContent = "";
+      this._els.btnAnalyzeRfChapter.disabled = true;
+      return;
+    }
+
+    const chapter = Number(raw);
+    this.rfChapter = chapter;
+    this._els.btnAnalyzeRfChapter.disabled = false;
+
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) return;
+
+    try {
+      const scope = await invoke("build_rf_chapter_scope", {
+        storyPath: this.rfStoryPath,
+        chapter,
+      });
+      this._els.rfScopeNote.textContent =
+        `${scope.act_count} act(s), ${scope.paragraph_count} paragraph(s) — ` +
+        `${scope.text.length.toLocaleString()} chars`;
+    } catch (err) {
+      console.warn("build_rf_chapter_scope failed:", err);
+      this._els.rfScopeNote.textContent = this._formatInvokeError(err);
+      this._els.btnAnalyzeRfChapter.disabled = true;
+    }
+  }
+
+  /** Analyze the selected RF chapter with pipeline multi-pass + act-scoped grid pages. */
+  async _startRfChapterAnalysis() {
+    if (!this.rfStoryPath || !this.rfChapter) {
+      this._showAnalysisError("Select an RF story and chapter first.");
+      return;
+    }
+
+    const settings = this.getSettings();
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    this._savedSettings = { ...settings };
+    this._els.btnAnalyzeRfChapter.disabled = true;
+
+    try {
+      this._showProgressView("");
+    } catch (renderErr) {
+      console.error("Failed to render progress view:", renderErr);
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      return;
+    }
+
+    try {
+      window.currentJobId = "";
+      const payload = await invoke("analyze_rf_chapter", {
+        storyPath: this.rfStoryPath,
+        chapter: this.rfChapter,
+        windowSize: settings.phraseLength,
+        stride: settings.stride,
+        tokensPerPage: settings.tokensPerPage,
+        minRepetitions: settings.minRepetitions,
+        minSamples: settings.minSamples,
+        enableHdbscan: settings.enableHdbscan,
+        linkSubphrases: settings.linkSubphrases,
+      });
+
+      if (payload?.job_id) {
+        if (this._progressView) {
+          this._progressView.setJobId(payload.job_id);
+        }
+        const label = `${this.rfStoryPath.split(/[/\\]/).pop() || "story"} ch${this.rfChapter}`;
+        this.filePath = this.rfStoryPath;
+        this.isPdf = false;
+        this._els.fileName.textContent = label;
+        this._els.fileName.title = this.rfStoryPath;
+        await applyVisualizationPayload(payload);
+      }
+    } catch (err) {
+      console.error("analyze_rf_chapter failed:", err);
+      this._showAnalysisError(err);
+    } finally {
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      await this._restoreSettingsView();
+    }
   }
 
   /** Open a native file dialog to select a document */
@@ -812,6 +1024,10 @@ export class ImportSettingsPanel {
       this._els.fileName.title = this.filePath;
     }
 
+    if (this.rfStoryPath) {
+      void this._restoreRfSection();
+    }
+
     // Restore saved settings if available
     if (this._savedSettings) {
       this._els.tokensPerPage.value = this._savedSettings.tokensPerPage;
@@ -903,6 +1119,29 @@ export class ImportSettingsPanel {
     // Transition to progress view in paused state
     this._showProgressView(partialJob.job_id);
     this._progressView.showResumeBanner(partialJob);
+  }
+
+  /** Restore RF story picker state after progress view teardown. */
+  async _restoreRfSection() {
+    if (!this.rfStoryPath || !this._els.rfMeta) return;
+    this._els.rfMeta.hidden = false;
+    const storyName = this.rfStoryPath.split(/[/\\]/).pop() || this.rfStoryPath;
+    this._els.rfStoryName.textContent = storyName;
+    this._els.rfStoryName.title = this.rfStoryPath;
+
+    const select = this._els.rfChapterSelect;
+    select.innerHTML = '<option value="">Select chapter…</option>';
+    for (const ch of this._rfChapters) {
+      const opt = document.createElement("option");
+      opt.value = String(ch);
+      opt.textContent = `Chapter ${ch}`;
+      select.appendChild(opt);
+    }
+    if (this.rfChapter) {
+      select.value = String(this.rfChapter);
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      await this._onRfChapterSelected();
+    }
   }
 
   /**

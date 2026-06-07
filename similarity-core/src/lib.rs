@@ -14,6 +14,7 @@ pub mod multi_pass;
 pub mod ort_runtime;
 pub mod rasterizer;
 pub mod report;
+pub mod rf_story;
 pub mod spans;
 pub mod storage;
 pub mod subcell;
@@ -42,10 +43,15 @@ pub use visualization::{
 };
 
 pub use contract::{
-    build_analysis_output, build_analysis_output_with_manifest, build_scope_manifest,
-    from_export_json, merge_pass_reports, repetition_report_to_v1, to_export_json,
-    validate_analysis_output, ActSegment, AnalysisOutput, AnalysisPassRecord, ClusterSummaryV1,
-    ContractError, EditSpanV1, ParagraphIndexEntry, RepetitionReportV1,
+    assemble_rf_chapter_scope, build_analysis_output, build_analysis_output_with_manifest,
+    build_scope_manifest, from_export_json, merge_pass_reports, parse_act_paragraphs,
+    repetition_report_to_v1, to_export_json, validate_analysis_output, ActSegment,
+    AnalysisOutput, AnalysisPassRecord, ClusterSummaryV1, ContractError, EditSpanV1,
+    ParagraphIndexEntry, RepetitionReportV1,
+};
+pub use rf_story::{
+    act_draft_paths_for_chapter, build_rf_chapter_scope, chapter_scope_from_manifest,
+    list_rf_chapters, load_rf_chapter, RfChapterDraft, RfChapterList, RfChapterScope,
 };
 pub use report::{
     build_repetition_report, build_repetition_report_from_registry,

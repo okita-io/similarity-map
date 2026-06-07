@@ -351,6 +351,8 @@ pub fn analyze_prose(
             options.tolerance,
             options.gamma,
             options.expand_to_sentences,
+            Some(input.scope_manifest.clone()),
+            None,
         ))
     } else {
         None

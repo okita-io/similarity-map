@@ -837,6 +837,129 @@ pub async fn analyze_text(
         })
 }
 
+/// List chapters available under a Romance Factory story directory.
+#[tauri::command]
+pub async fn list_rf_chapters(story_path: String) -> Result<similarity_core::RfChapterList, AppError> {
+    similarity_core::list_rf_chapters(std::path::Path::new(&story_path))
+}
+
+/// Build chapter prose + ScopeManifest from RF act drafts (no analysis).
+#[tauri::command]
+pub async fn build_rf_chapter_scope(
+    story_path: String,
+    chapter: u32,
+) -> Result<similarity_core::RfChapterScope, AppError> {
+    similarity_core::build_rf_chapter_scope(std::path::Path::new(&story_path), chapter)
+}
+
+/// Analyze one RF chapter using the default multi-pass bundle (pipeline parity) plus UI visualization.
+#[tauri::command]
+pub async fn analyze_rf_chapter(
+    app_handle: tauri::AppHandle,
+    story_path: String,
+    chapter: u32,
+    window_size: u32,
+    stride: u32,
+    tokens_per_page: Option<u32>,
+    min_repetitions: u32,
+    min_samples: u32,
+    enable_hdbscan: Option<bool>,
+    link_subphrases: Option<bool>,
+) -> Result<similarity_core::VisualizationPayload, AppError> {
+    use similarity_core::{
+        analyze_prose_multi_pass, build_visualization_payload, chapter_scope_from_manifest,
+        default_rf_multi_pass_config, load_rf_chapter, run_analysis_stages,
+        MultiPassInput, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
+    };
+
+    let story = std::path::Path::new(&story_path);
+    let draft = load_rf_chapter(story, chapter)?;
+
+    let display_params = similarity_core::AnalysisParams {
+        window_size,
+        stride,
+        tokens_per_page,
+        chapter_break_regex: None,
+        min_repetitions,
+        min_samples,
+        enable_hdbscan: enable_hdbscan.unwrap_or(true),
+        link_subphrases: link_subphrases.unwrap_or(false),
+    };
+    similarity_core::validate_analysis_params(&display_params, None)?;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+    let model_path = model::model_path(&app_data_dir);
+
+    let job_id = format!(
+        "rf_ch{:02}_{}",
+        chapter,
+        draft
+            .document_hash
+            .chars()
+            .take(8)
+            .collect::<String>()
+    );
+
+    let chapter_scope = chapter_scope_from_manifest(&draft.text, &draft.scope_manifest);
+    let mut multi_scope = chapter_scope.clone();
+    multi_scope.document_path = Some(story_path.clone());
+    multi_scope.document_hash = Some(draft.document_hash.clone());
+
+    let multi_input = MultiPassInput {
+        text: draft.text.clone(),
+        scope_manifest: draft.scope_manifest.clone(),
+        config: default_rf_multi_pass_config(),
+        chapter_scope: multi_scope,
+        job_id: job_id.clone(),
+    };
+
+    let mut engine = similarity_core::embedding::EmbeddingEngine::new(&model_path)?;
+    let multi_result = analyze_prose_multi_pass(&multi_input, &mut engine)?;
+
+    let viz_artifacts = run_analysis_stages(
+        &draft.text,
+        &display_params,
+        &draft.scope_manifest,
+        &job_id,
+        &mut engine,
+        true,
+    )?;
+
+    let mut payload = build_visualization_payload(
+        &job_id,
+        &viz_artifacts.pages,
+        &viz_artifacts.window_data,
+        &viz_artifacts.cluster_registry,
+        &viz_artifacts.page_sub_grids,
+        &display_params,
+        DEFAULT_TOLERANCE,
+        DEFAULT_GAMMA,
+        true,
+        Some(draft.scope_manifest.clone()),
+        Some(multi_result.output.clone()),
+    );
+    payload.job_id = job_id;
+
+    crate::log_info!(
+        app_handle,
+        "command",
+        "analyze_rf_chapter complete: story={} chapter={} clusters={}",
+        story_path,
+        chapter,
+        payload
+            .analysis_output
+            .as_ref()
+            .map(|o| o.merged_repetition_report.stats.cluster_count)
+            .unwrap_or(0)
+    );
+
+    Ok(payload)
+}
+
 /// Persists display state (tolerance, gamma, hidden clusters, zoom, scroll).
 #[tauri::command]
 pub async fn save_display_state(

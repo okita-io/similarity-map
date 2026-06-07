@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use similarity_core::build_scope_manifest;
 use similarity_core::contract::validate_analysis_output;
 use similarity_core::{MultiPassConfig, PassScope, PassSpec};
 use similarity_core::report::AnalysisScope;
@@ -207,11 +206,10 @@ pub fn context_from_story(
     model_path: Option<std::path::PathBuf>,
     test_embedder: bool,
 ) -> AnalyzeContext {
-    let manifest = build_scope_manifest(draft.chapter, &draft.text, 0);
     AnalyzeContext {
         text: draft.text,
         chapter: draft.chapter,
-        scope_manifest: manifest,
+        scope_manifest: draft.scope_manifest,
         document_path: Some(draft.source_path.to_string_lossy().into_owned()),
         document_hash: Some(draft.document_hash),
         pass_config,

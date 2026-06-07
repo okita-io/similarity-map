@@ -10,6 +10,8 @@ use crate::job_data::{load_job_render_data, parse_window_data_from_batches};
 use crate::importer::{import_document, ImportDocumentParams};
 use crate::report::{build_repetition_report, pages_to_document_text, RepetitionReport};
 use crate::rasterizer::{encode_canvas_base64, rasterize_page};
+use crate::report::ScopeManifest;
+use crate::contract::AnalysisOutput;
 use crate::storage::Storage;
 use crate::types::{AppError, ClusterRegistry, Page, PageSubGrid, SessionError};
 
@@ -73,6 +75,12 @@ pub struct VisualizationPayload {
     pub highlights: Vec<TextHighlight>,
     pub page_rasters: Vec<PageRaster>,
     pub analysis: AnalysisSummary,
+    /// Act/paragraph index when analysis used an RF scope manifest (one grid page per act).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_manifest: Option<ScopeManifest>,
+    /// Pipeline-consumable v1 output (multi-pass merge) when loaded from RF chapter analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_output: Option<AnalysisOutput>,
 }
 
 impl AnalysisSummary {
@@ -160,6 +168,8 @@ pub fn build_visualization_payload(
     tolerance: f32,
     gamma: f32,
     expand_to_sentences: bool,
+    scope_manifest: Option<ScopeManifest>,
+    analysis_output: Option<AnalysisOutput>,
 ) -> VisualizationPayload {
     let document_text = pages_to_document_text(pages);
     let repetition_report = build_repetition_report(
@@ -200,6 +210,8 @@ pub fn build_visualization_payload(
         highlights,
         page_rasters,
         analysis,
+        scope_manifest,
+        analysis_output,
     }
 }
 
@@ -268,6 +280,8 @@ pub async fn load_visualization_payload(
         tolerance,
         gamma,
         expand_to_sentences,
+        None,
+        None,
     ))
 }
 
