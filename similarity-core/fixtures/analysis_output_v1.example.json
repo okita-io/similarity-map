@@ -162,7 +162,7 @@
                 "member_window_count": 2
               }
             ],
-            "suggested_op": "remove",
+            "suggested_op": "delete_span",
             "cross_act": false,
             "needs_bridge": false
           }
@@ -171,7 +171,8 @@
           "cluster_count": 1,
           "total_duplicate_instances": 1,
           "total_duplicate_words_estimate": 4
-        }
+        },
+        "boundary_version": 1
       }
     },
     {
@@ -271,16 +272,17 @@
                 "member_window_count": 3
               }
             ],
-            "suggested_op": "bridge",
+            "suggested_op": "rewrite_span",
             "cross_act": true,
-            "needs_bridge": true
+            "needs_bridge": false
           }
         ],
         "stats": {
           "cluster_count": 1,
           "total_duplicate_instances": 1,
           "total_duplicate_words_estimate": 8
-        }
+        },
+        "boundary_version": 1
       }
     }
   ],
@@ -368,7 +370,7 @@
             "member_window_count": 2
           }
         ],
-        "suggested_op": "remove",
+        "suggested_op": "delete_span",
         "cross_act": false,
         "needs_bridge": false
       },
@@ -453,15 +455,16 @@
             "member_window_count": 3
           }
         ],
-        "suggested_op": "bridge",
+        "suggested_op": "rewrite_span",
         "cross_act": true,
-        "needs_bridge": true
+        "needs_bridge": false
       }
     ],
     "stats": {
       "cluster_count": 2,
       "total_duplicate_instances": 2,
       "total_duplicate_words_estimate": 12
-    }
+    },
+    "boundary_version": 1
   }
 }

@@ -47,19 +47,22 @@ Legacy `RepetitionReport` spans (doc offsets only) upgrade via `repetition_repor
 
 | Field | Type | Description |
 |---|---|---|
-| `suggested_op` | `"keep"` \| `"rewrite"` \| `"remove"` \| `"bridge"` | Editorial hint for surgical dedupe |
+| `suggested_op` | `"delete_span"` \| `"rewrite_span"` \| `"replace_paragraph"` | RF PatchPlanner op — route without re-deriving heuristics |
 | `cross_act` | `bool` | Duplicate instances span more than one act |
-| `needs_bridge` | `bool` | Cross-act echo with similarity ≥ 0.85 — insert bridge prose before rewrite |
+| `needs_bridge` | `bool` | Mid-act paragraph-sized duplicate (>40 words) — insert bridge prose before destructive edit |
+| `boundary_version` | `1` | Sentence-boundary expansion version for RF span expansion parity |
 
 ### `suggested_op` derivation (default rules)
 
-1. **`bridge`** — `needs_bridge == true`
-2. **`rewrite`** — `cross_act == true` (without bridge threshold)
-3. **`rewrite`** — same-act cluster with blast radius > 50 words (coarse chapter-pass echoes)
-4. **`remove`** — same-act duplicates with all `similarity_to_centroid ≥ 0.95` and blast radius ≤ 15 words
-5. **`rewrite`** — default for remaining same-act fuzzy echoes
+1. **`replace_paragraph`** — duplicate blast radius > 40 words (whole-paragraph echo)
+2. **`delete_span`** — same-act duplicates with all `similarity_to_centroid ≥ 0.95` and blast radius ≤ 15 words
+3. **`rewrite_span`** — cross-act echoes under paragraph size, or remaining same-act fuzzy echoes
 
-Blast radius is the max whitespace-delimited word count across cluster spans (`cluster_blast_radius_words`).
+Blast radius is the max whitespace-delimited word count across **duplicate** instances (`duplicate_blast_radius_words`).
+
+### `needs_bridge`
+
+Set when `cross_act == false` and duplicate blast radius > 40 words — signals the surgical editor to insert transitional bridge prose before replacing or deleting the paragraph-sized echo mid-act.
 
 ## Multi-pass merge rules
 
@@ -106,7 +109,8 @@ use similarity_core::{
     analyze_prose, analyze_prose_with_model, build_analysis_output,
     build_analysis_output_with_manifest, from_export_json, merge_pass_reports,
     repetition_report_to_v1, AnalysisInput, AnalyzeProseOptions, AnalysisOutput,
-    DeterministicTestEmbedder, SCHEMA_VERSION, TextEmbedder,
+    BOUNDARY_VERSION, DeterministicTestEmbedder, derive_cluster_enrichments_v1, SCHEMA_VERSION,
+    TextEmbedder,
 };
 ```
 

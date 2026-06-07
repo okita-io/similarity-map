@@ -12,7 +12,7 @@ use crate::contract::{
     build_analysis_output_with_manifest, repetition_report_to_v1, AnalysisOutput,
     AnalysisPassRecord,
 };
-use crate::report::{AnalysisScope, AnalysisStats, ScopeManifest, ScopeSegment, SuggestedOp};
+use crate::report::{AnalysisScope, AnalysisStats, ScopeManifest, ScopeSegment};
 use crate::types::AppError;
 
 /// Which manuscript unit a pass targets.
@@ -410,6 +410,7 @@ fn empty_pass_report(job_id: &str) -> crate::contract::RepetitionReportV1 {
             total_duplicate_instances: 0,
             total_duplicate_words_estimate: 0,
         },
+        boundary_version: crate::report::BOUNDARY_VERSION,
     }
 }
 
@@ -421,62 +422,13 @@ fn is_benign_no_repetition_error(err: &AppError) -> bool {
     }
 }
 
-/// Max whitespace-delimited word count across cluster spans (surgical blast radius).
-pub fn cluster_blast_radius_words(cluster: &crate::contract::ClusterSummaryV1) -> u32 {
-    let spans: Vec<&crate::contract::EditSpanV1> = if cluster.spans.is_empty() {
-        std::iter::once(&cluster.canonical)
-            .chain(cluster.duplicates.iter())
-            .collect()
-    } else {
-        cluster.spans.iter().collect()
-    };
-    spans
-        .iter()
-        .map(|s| s.text.split_whitespace().count() as u32)
-        .max()
-        .unwrap_or(0)
-}
-
-/// Derive `suggested_op` using cross-act rules plus span-size blast radius.
-pub fn suggested_op_for_merged_cluster(
-    cluster: &crate::contract::ClusterSummaryV1,
-) -> SuggestedOp {
-    let acts: std::collections::HashSet<u32> =
-        cluster.spans.iter().map(|s| s.location.act).collect();
-    let cross_act = acts.len() > 1;
-    let needs_bridge = cross_act
-        && cluster
-            .spans
-            .iter()
-            .any(|s| s.similarity_to_centroid >= 0.85);
-    let blast_radius = cluster_blast_radius_words(cluster);
-
-    if needs_bridge {
-        SuggestedOp::Bridge
-    } else if cross_act {
-        SuggestedOp::Rewrite
-    } else if blast_radius > 50 {
-        // Coarse chapter-pass echoes — too large to delete outright.
-        SuggestedOp::Rewrite
-    } else if cluster
-        .duplicates
-        .iter()
-        .all(|d| d.similarity_to_centroid >= 0.95)
-        && blast_radius <= 15
-    {
-        SuggestedOp::Remove
-    } else {
-        SuggestedOp::Rewrite
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::contract::{validate_analysis_output, EditSpanV1, ClusterSummaryV1};
     use crate::analyze_prose::DeterministicTestEmbedder;
     use crate::contract::build_scope_manifest;
-    use crate::report::{AnalysisScope, SpanLocation, SuggestedOp};
+    use crate::report::{AnalysisScope, SpanLocation, SuggestedOp, derive_cluster_enrichments_v1};
 
     fn repeated_chapter_text() -> String {
         let phrase = "alpha beta gamma delta epsilon alpha beta gamma delta epsilon";
@@ -562,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn suggested_op_prefers_rewrite_for_large_blast_radius() {
+    fn large_duplicate_span_suggests_replace_paragraph() {
         let cluster = ClusterSummaryV1 {
             cluster_id: 1,
             representative_text: "x".into(),
@@ -605,18 +557,19 @@ mod tests {
                 member_window_count: 1,
             }],
             spans: vec![],
-            suggested_op: SuggestedOp::Remove,
+            suggested_op: SuggestedOp::DeleteSpan,
             cross_act: false,
             needs_bridge: false,
         };
-        assert_eq!(
-            suggested_op_for_merged_cluster(&cluster),
-            SuggestedOp::Rewrite
-        );
+        let spans = vec![cluster.canonical.clone(), cluster.duplicates[0].clone()];
+        let (cross_act, needs_bridge, suggested_op) = derive_cluster_enrichments_v1(&spans);
+        assert!(!cross_act);
+        assert!(needs_bridge);
+        assert_eq!(suggested_op, SuggestedOp::ReplaceParagraph);
     }
 
     #[test]
-    fn small_blast_radius_suggests_remove() {
+    fn small_blast_radius_suggests_delete_span() {
         let make_span = |start: u32, end: u32, words: usize| EditSpanV1 {
             location: SpanLocation {
                 chapter: 1,
@@ -644,14 +597,12 @@ mod tests {
             canonical: make_span(0, 50, 5),
             duplicates: vec![make_span(60, 110, 5)],
             spans: vec![make_span(0, 50, 5), make_span(60, 110, 5)],
-            suggested_op: SuggestedOp::Rewrite,
+            suggested_op: SuggestedOp::RewriteSpan,
             cross_act: false,
             needs_bridge: false,
         };
 
-        assert_eq!(
-            suggested_op_for_merged_cluster(&cluster),
-            SuggestedOp::Remove
-        );
+        let (_, _, suggested_op) = derive_cluster_enrichments_v1(&cluster.spans);
+        assert_eq!(suggested_op, SuggestedOp::DeleteSpan);
     }
 }

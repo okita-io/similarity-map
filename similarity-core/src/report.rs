@@ -14,22 +14,32 @@ use crate::types::{AppError, ClusterRegistry, Page, SessionError};
 /// Current repetition report schema version string.
 pub const SCHEMA_VERSION: &str = "1";
 
-/// Editorial operation suggested for a repetition cluster.
+/// Sentence-boundary expansion version — must match Romance Factory span expansion.
+pub const BOUNDARY_VERSION: u32 = 1;
+
+/// Word-count threshold for whole-paragraph surgical ops and mid-act bridge hints.
+pub const PARAGRAPH_WORD_THRESHOLD: u32 = 40;
+
+/// Max duplicate span word count eligible for `delete_span`.
+pub const DELETE_SPAN_MAX_WORDS: u32 = 15;
+
+/// Minimum similarity for near-exact `delete_span` routing.
+pub const HIGH_SIMILARITY: f32 = 0.95;
+
+/// Editorial operation suggested for a repetition cluster — maps 1:1 to RF PatchPlanner ops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestedOp {
-    /// Keep the canonical instance; no edit required on duplicates beyond optional polish.
-    Keep,
-    /// Rewrite duplicate instances in place.
-    Rewrite,
-    /// Remove duplicate instances (same-act near-exact echo).
-    Remove,
-    /// Insert transitional bridge prose between acts before rewriting.
-    Bridge,
+    /// Remove a near-exact duplicate phrase (`delete_span`).
+    DeleteSpan,
+    /// Rewrite duplicate in place with LLM (`rewrite_span`).
+    RewriteSpan,
+    /// Replace an entire paragraph-sized echo (`replace_paragraph`).
+    ReplaceParagraph,
 }
 
 fn default_suggested_op() -> SuggestedOp {
-    SuggestedOp::Rewrite
+    SuggestedOp::RewriteSpan
 }
 
 /// What manuscript unit this analysis covers.
@@ -196,31 +206,94 @@ pub fn pages_to_document_text(pages: &[Page]) -> String {
     pages.iter().map(|p| p.text.as_str()).collect()
 }
 
-/// Derive cluster editorial enrichments from span locations and similarities.
+/// Derive cluster editorial enrichments from span locations, similarities, and word counts.
 pub fn derive_cluster_enrichments(spans: &[EditSpan]) -> (bool, bool, SuggestedOp) {
-    let acts: std::collections::HashSet<u32> = spans
+    let instances: Vec<(u32, f32, &str)> = spans
         .iter()
-        .filter_map(|span| span.location.as_ref().map(|loc| loc.act))
+        .filter_map(|span| {
+            span.location
+                .as_ref()
+                .map(|loc| (loc.act, span.similarity_to_centroid, span.text.as_str()))
+        })
         .collect();
-    let cross_act = acts.len() > 1;
-    let needs_bridge = cross_act
-        && spans
-            .iter()
-            .any(|span| span.similarity_to_centroid >= 0.85);
-    let duplicates: Vec<&EditSpan> = spans.iter().skip(1).collect();
-    let suggested_op = if needs_bridge {
-        SuggestedOp::Bridge
-    } else if cross_act {
-        SuggestedOp::Rewrite
-    } else if duplicates
+    if instances.len() == spans.len() && !instances.is_empty() {
+        return derive_enrichments_from_instances(&instances);
+    }
+
+    // Fallback when locations are unresolved — same-act fuzzy rewrite.
+    let duplicates: Vec<_> = spans.iter().skip(1).collect();
+    let blast = duplicate_blast_radius_words(duplicates.iter().map(|s| s.text.as_str()));
+    let all_high = duplicates
         .iter()
-        .all(|span| span.similarity_to_centroid >= 0.95)
-    {
-        SuggestedOp::Remove
+        .all(|span| span.similarity_to_centroid >= HIGH_SIMILARITY);
+    let suggested_op = if all_high && blast <= DELETE_SPAN_MAX_WORDS {
+        SuggestedOp::DeleteSpan
+    } else if blast > PARAGRAPH_WORD_THRESHOLD {
+        SuggestedOp::ReplaceParagraph
     } else {
-        SuggestedOp::Rewrite
+        SuggestedOp::RewriteSpan
     };
+    (false, blast > PARAGRAPH_WORD_THRESHOLD, suggested_op)
+}
+
+/// Like [`derive_cluster_enrichments`] for v1 contract spans (always location-resolved).
+pub fn derive_cluster_enrichments_v1(
+    spans: &[crate::contract::EditSpanV1],
+) -> (bool, bool, SuggestedOp) {
+    let instances: Vec<(u32, f32, &str)> = spans
+        .iter()
+        .map(|span| {
+            (
+                span.location.act,
+                span.similarity_to_centroid,
+                span.text.as_str(),
+            )
+        })
+        .collect();
+    derive_enrichments_from_instances(&instances)
+}
+
+fn derive_enrichments_from_instances(
+    instances: &[(u32, f32, &str)],
+) -> (bool, bool, SuggestedOp) {
+    if instances.is_empty() {
+        return (false, false, SuggestedOp::RewriteSpan);
+    }
+
+    let acts: std::collections::HashSet<u32> = instances.iter().map(|(act, _, _)| *act).collect();
+    let cross_act = acts.len() > 1;
+    let duplicates = &instances[1..];
+    let blast = duplicate_blast_radius_words(duplicates.iter().map(|(_, _, text)| *text));
+    let all_high = duplicates
+        .iter()
+        .all(|(_, sim, _)| *sim >= HIGH_SIMILARITY);
+
+    let suggested_op = if cross_act {
+        if blast > PARAGRAPH_WORD_THRESHOLD {
+            SuggestedOp::ReplaceParagraph
+        } else {
+            SuggestedOp::RewriteSpan
+        }
+    } else if all_high && blast <= DELETE_SPAN_MAX_WORDS {
+        SuggestedOp::DeleteSpan
+    } else if blast > PARAGRAPH_WORD_THRESHOLD {
+        SuggestedOp::ReplaceParagraph
+    } else {
+        SuggestedOp::RewriteSpan
+    };
+
+    // Mid-act paragraph-sized duplicate — insert bridge prose before destructive edit.
+    let needs_bridge = !cross_act && blast > PARAGRAPH_WORD_THRESHOLD;
+
     (cross_act, needs_bridge, suggested_op)
+}
+
+/// Max whitespace-delimited word count across duplicate instance texts (surgical blast radius).
+pub fn duplicate_blast_radius_words<'a>(duplicate_texts: impl Iterator<Item = &'a str>) -> u32 {
+    duplicate_texts
+        .map(|text| text.split_whitespace().count() as u32)
+        .max()
+        .unwrap_or(0)
 }
 
 /// Resolve structural location for a document span against a scope manifest.
@@ -714,13 +787,13 @@ mod tests {
             duplicates: vec![duplicate.clone()],
             spans: vec![canonical, duplicate],
             cross_act: false,
-            suggested_op: SuggestedOp::Remove,
+            suggested_op: SuggestedOp::DeleteSpan,
             needs_bridge: false,
         };
         let json = serde_json::to_string(&cluster).unwrap();
         let parsed: ClusterSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, cluster);
-        assert_eq!(parsed.suggested_op, SuggestedOp::Remove);
+        assert_eq!(parsed.suggested_op, SuggestedOp::DeleteSpan);
     }
 
     #[test]
@@ -762,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_cluster_enrichments_cross_act_bridge() {
+    fn derive_cluster_enrichments_cross_act_rewrite() {
         let spans = vec![
             EditSpan {
                 cluster_id: 1,
@@ -795,8 +868,47 @@ mod tests {
         ];
         let (cross_act, needs_bridge, suggested_op) = derive_cluster_enrichments(&spans);
         assert!(cross_act);
+        assert!(!needs_bridge);
+        assert_eq!(suggested_op, SuggestedOp::RewriteSpan);
+    }
+
+    #[test]
+    fn derive_cluster_enrichments_mid_act_paragraph_needs_bridge() {
+        let long_text = "word ".repeat(45);
+        let spans = vec![
+            EditSpan {
+                cluster_id: 1,
+                instance_id: 1,
+                doc_char_start: 0,
+                doc_char_end: 100,
+                text: long_text.clone(),
+                similarity_to_centroid: 1.0,
+                member_window_count: 1,
+                location: Some(SpanLocation {
+                    act: 1,
+                    ..sample_span_location()
+                }),
+            },
+            EditSpan {
+                cluster_id: 1,
+                instance_id: 2,
+                doc_char_start: 200,
+                doc_char_end: 300,
+                text: long_text,
+                similarity_to_centroid: 0.99,
+                member_window_count: 1,
+                location: Some(SpanLocation {
+                    act: 1,
+                    paragraph_index: 2,
+                    segment_id: "ch01_a01_p02".to_string(),
+                    ..sample_span_location()
+                }),
+            },
+        ];
+        let (cross_act, needs_bridge, suggested_op) = derive_cluster_enrichments(&spans);
+        assert!(!cross_act);
         assert!(needs_bridge);
-        assert_eq!(suggested_op, SuggestedOp::Bridge);
+        assert_eq!(suggested_op, SuggestedOp::ReplaceParagraph);
     }
 
     #[test]
@@ -838,7 +950,7 @@ mod tests {
         assert_eq!(cluster.duplicates[1].text, "Gamma block here.");
         assert_eq!(report.stats.total_duplicate_instances, 2);
         assert!(!cluster.cross_act);
-        assert_eq!(cluster.suggested_op, SuggestedOp::Remove);
+        assert_eq!(cluster.suggested_op, SuggestedOp::DeleteSpan);
         assert!(cluster.canonical.location.is_none());
         assert!(report.schema_version.is_none());
     }
