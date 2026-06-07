@@ -801,6 +801,47 @@ body {
   color: #ffb4b4;
 }
 
+.results-export-section {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--accent);
+}
+
+.results-export-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.settings-yaml-export {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-yaml-export-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.settings-yaml-export-status {
+  min-height: 1.2em;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.settings-yaml-export-status[data-kind="error"] {
+  color: #ffb4b4;
+}
+
+.import-settings-export {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--accent);
+}
+
 
 /* === Progress View === */
 

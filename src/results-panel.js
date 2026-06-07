@@ -1,6 +1,7 @@
 // Saved Results Panel — manage named analysis results for the open document.
 
 import { activateJob } from "./job-activation.js";
+import { mountSettingsYamlExportControls } from "./export-settings-yaml.js";
 
 /**
  * @typedef {Object} SavedResultEntry
@@ -77,6 +78,11 @@ export class ResultsPanel {
         </div>
 
         <div id="results-status" class="results-status" role="status" aria-live="polite"></div>
+
+        <div class="results-export-section">
+          <div class="results-export-title">Pipeline export</div>
+          <div id="results-settings-yaml-export"></div>
+        </div>
       </div>
     `;
 
@@ -90,6 +96,16 @@ export class ResultsPanel {
       btnSaveAs: this.container.querySelector("#btn-result-save-as"),
       btnDelete: this.container.querySelector("#btn-result-delete"),
     };
+
+    mountSettingsYamlExportControls(
+      this.container.querySelector("#results-settings-yaml-export"),
+      {
+        getExportSettings: () => {
+          const panel = window.importSettingsPanel;
+          return panel?.getExportSettings?.() ?? null;
+        },
+      },
+    );
   }
 
   _attachListeners() {

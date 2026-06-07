@@ -5,38 +5,16 @@ import { ProgressView } from "./progress-view.js";
 import { bindSliderNumberInput } from "./slider-input.js";
 import { activateJob } from "./job-activation.js";
 import { applyVisualizationPayload } from "./text-preview.js";
+import {
+  buildExportSettingsFromPanel,
+  inferAnalysisPassMode,
+  mountSettingsYamlExportControls,
+} from "./export-settings-yaml.js";
 
-/** RF chapter multi-pass presets — window/stride pairs match `generate:similarity_map:passes`. */
-export const RF_CHAPTER_PRESETS = {
-  act_fine: {
-    label: "Romance Factory — act fine",
-    displayPass: { windowSize: 50, stride: 10 },
-    passes: [
-      { name: "act_50_10", scope: "act", windowSize: 50, stride: 10 },
-      { name: "act_100_25", scope: "act", windowSize: 100, stride: 25 },
-    ],
-  },
-  chapter_coarse: {
-    label: "RF — chapter coarse",
-    displayPass: { windowSize: 200, stride: 50 },
-    passes: [
-      { name: "chapter_200_50", scope: "chapter", windowSize: 200, stride: 50 },
-      { name: "chapter_400_100", scope: "chapter", windowSize: 400, stride: 100 },
-    ],
-  },
-  full_multi_pass: {
-    label: "RF — full multi-pass",
-    displayPass: { windowSize: 50, stride: 10 },
-    passes: [
-      { name: "act_50_10", scope: "act", windowSize: 50, stride: 10 },
-      { name: "act_100_25", scope: "act", windowSize: 100, stride: 25 },
-      { name: "chapter_200_50", scope: "chapter", windowSize: 200, stride: 50 },
-      { name: "chapter_400_100", scope: "chapter", windowSize: 400, stride: 100 },
-    ],
-  },
-};
-
-const DEFAULT_RF_CHAPTER_PRESET = "full_multi_pass";
+import {
+  DEFAULT_RF_CHAPTER_PRESET,
+  RF_CHAPTER_PRESETS,
+} from "./rf-chapter-presets.js";
 
 /**
  * @typedef {Object} RfPassEstimate
@@ -84,6 +62,12 @@ export class ImportSettingsPanel {
     this.rfChapterPreset = DEFAULT_RF_CHAPTER_PRESET;
     /** @type {RfChapterPassEstimate|null} */
     this._lastRfPassEstimate = null;
+
+    /** @type {"rf_preset"|"single"|null} Last analysis pass mode for YAML export */
+    this._lastAnalysisPassMode = null;
+
+    /** @type {ReturnType<typeof mountSettingsYamlExportControls>|null} */
+    this._settingsYamlExport = null;
 
     // Track whether user has manually overridden stride
     this._strideManuallySet = false;
@@ -384,6 +368,8 @@ export class ImportSettingsPanel {
         <div class="import-settings-actions">
           <button id="btn-analyze" class="btn-analyze" type="button">Analyze</button>
         </div>
+
+        <div class="import-settings-export" id="import-settings-export"></div>
       </div>
     `;
 
@@ -422,7 +408,17 @@ export class ImportSettingsPanel {
       btnAnalyzeRfChapter: this.container.querySelector("#btn-analyze-rf-chapter"),
       pasteTextArea: this.container.querySelector("#paste-text-area"),
       btnAnalyzeText: this.container.querySelector("#btn-analyze-text"),
+      exportContainer: this.container.querySelector("#import-settings-export"),
     };
+
+    this._mountSettingsYamlExport();
+  }
+
+  _mountSettingsYamlExport() {
+    if (!this._els.exportContainer) return;
+    this._settingsYamlExport = mountSettingsYamlExportControls(this._els.exportContainer, {
+      getExportSettings: () => this.getExportSettings(),
+    });
   }
 
   /** Attach event listeners to all controls */
@@ -751,6 +747,7 @@ export class ImportSettingsPanel {
       return;
     }
 
+    this._lastAnalysisPassMode = "rf_preset";
     const settings = this.getSettings();
     const invoke = window.__TAURI__?.core?.invoke;
     if (!invoke) {
@@ -1022,6 +1019,7 @@ export class ImportSettingsPanel {
       return;
     }
 
+    this._lastAnalysisPassMode = "single";
     const settings = this.getSettings();
     this._savedSettings = { ...settings };
 
@@ -1109,6 +1107,7 @@ export class ImportSettingsPanel {
       return;
     }
 
+    this._lastAnalysisPassMode = "single";
     const settings = this.getSettings();
     const invoke = window.__TAURI__?.core?.invoke;
     if (!invoke) {
@@ -1250,6 +1249,7 @@ export class ImportSettingsPanel {
       this._updateHdbscanDependentControls();
     }
 
+    this._mountSettingsYamlExport();
     this._updateEstimate();
   }
 
@@ -1366,6 +1366,15 @@ export class ImportSettingsPanel {
       chapterBreak: this._els.chapterBreak.value.trim(),
       rfChapterPreset: this.rfChapterPreset,
     };
+  }
+
+  /** Settings payload for `generate:similarity_map:` YAML export (THE-326). */
+  getExportSettings() {
+    if (!this._els?.phraseLength) return null;
+    return buildExportSettingsFromPanel(
+      this.getSettings(),
+      inferAnalysisPassMode(this),
+    );
   }
 
   /** Gray out Min Samples when HDBSCAN is bypassed */
