@@ -6,6 +6,54 @@ import { bindSliderNumberInput } from "./slider-input.js";
 import { activateJob } from "./job-activation.js";
 import { applyVisualizationPayload } from "./text-preview.js";
 
+/** RF chapter multi-pass presets — window/stride pairs match `generate:similarity_map:passes`. */
+export const RF_CHAPTER_PRESETS = {
+  act_fine: {
+    label: "Romance Factory — act fine",
+    displayPass: { windowSize: 50, stride: 10 },
+    passes: [
+      { name: "act_50_10", scope: "act", windowSize: 50, stride: 10 },
+      { name: "act_100_25", scope: "act", windowSize: 100, stride: 25 },
+    ],
+  },
+  chapter_coarse: {
+    label: "RF — chapter coarse",
+    displayPass: { windowSize: 200, stride: 50 },
+    passes: [
+      { name: "chapter_200_50", scope: "chapter", windowSize: 200, stride: 50 },
+      { name: "chapter_400_100", scope: "chapter", windowSize: 400, stride: 100 },
+    ],
+  },
+  full_multi_pass: {
+    label: "RF — full multi-pass",
+    displayPass: { windowSize: 50, stride: 10 },
+    passes: [
+      { name: "act_50_10", scope: "act", windowSize: 50, stride: 10 },
+      { name: "act_100_25", scope: "act", windowSize: 100, stride: 25 },
+      { name: "chapter_200_50", scope: "chapter", windowSize: 200, stride: 50 },
+      { name: "chapter_400_100", scope: "chapter", windowSize: 400, stride: 100 },
+    ],
+  },
+};
+
+const DEFAULT_RF_CHAPTER_PRESET = "full_multi_pass";
+
+/**
+ * @typedef {Object} RfPassEstimate
+ * @property {string} name
+ * @property {string} scope
+ * @property {number} window_size
+ * @property {number} stride
+ * @property {number} window_count
+ */
+
+/**
+ * @typedef {Object} RfChapterPassEstimate
+ * @property {string} preset
+ * @property {RfPassEstimate[]} passes
+ * @property {number} total_windows
+ */
+
 /**
  * @typedef {Object} AnalysisEstimate
  * @property {number} page_count
@@ -25,6 +73,17 @@ export class ImportSettingsPanel {
     this.container = container;
     this.filePath = options.filePath || "";
     this.isPdf = options.isPdf || false;
+
+    /** @type {string|null} Romance Factory story directory path */
+    this.rfStoryPath = null;
+    /** @type {number|null} Selected RF chapter number */
+    this.rfChapter = null;
+    /** @type {number[]} */
+    this._rfChapters = [];
+    /** @type {string} */
+    this.rfChapterPreset = DEFAULT_RF_CHAPTER_PRESET;
+    /** @type {RfChapterPassEstimate|null} */
+    this._lastRfPassEstimate = null;
 
     // Track whether user has manually overridden stride
     this._strideManuallySet = false;
@@ -55,6 +114,7 @@ export class ImportSettingsPanel {
 
     this._buildUI();
     this._attachListeners();
+    void this._loadAppSettings();
     this._updateEstimate();
   }
 
@@ -72,6 +132,33 @@ export class ImportSettingsPanel {
             <span class="btn-open-file-text">Open Document</span>
           </button>
           <div class="import-file-name" id="import-file-name"></div>
+        </div>
+
+        <div class="import-rf-section">
+          <button id="btn-load-rf-story" class="btn-open-file btn-rf-story" type="button">
+            <span class="btn-open-file-icon" aria-hidden="true">📁</span>
+            <span class="btn-open-file-text">Load RF Story</span>
+          </button>
+          <div class="import-rf-meta" id="import-rf-meta" hidden>
+            <div class="import-rf-story-name" id="import-rf-story-name"></div>
+            <label class="setting-label" for="select-rf-preset">RF chapter preset</label>
+            <select id="select-rf-preset" class="setting-select" aria-label="RF chapter preset">
+              ${Object.entries(RF_CHAPTER_PRESETS)
+                .map(
+                  ([id, preset]) =>
+                    `<option value="${id}"${id === this.rfChapterPreset ? " selected" : ""}>${preset.label}</option>`,
+                )
+                .join("")}
+            </select>
+            <label class="setting-label" for="select-rf-chapter">Chapter</label>
+            <select id="select-rf-chapter" class="setting-select" aria-label="RF chapter">
+              <option value="">Select chapter…</option>
+            </select>
+            <div class="import-rf-scope-note setting-note" id="import-rf-scope-note"></div>
+            <button id="btn-analyze-rf-chapter" class="btn-secondary" type="button" disabled>
+              Analyze RF Chapter
+            </button>
+          </div>
         </div>
 
         <div class="import-settings-controls">
@@ -265,6 +352,14 @@ export class ImportSettingsPanel {
             <span class="estimate-label">Estimated time:</span>
             <span class="estimate-value" id="estimate-time">—</span>
           </div>
+          <div class="rf-pass-estimates" id="rf-pass-estimates" hidden>
+            <div class="rf-pass-estimates-title">Multi-pass window estimate</div>
+            <div class="rf-pass-estimates-list" id="rf-pass-estimates-list"></div>
+            <div class="estimate-row rf-pass-estimates-total">
+              <span class="estimate-label">Total windows (all passes):</span>
+              <span class="estimate-value" id="rf-pass-estimates-total">—</span>
+            </div>
+          </div>
           <div class="estimate-nudge" id="estimate-nudge" hidden>
             ⏱ Estimated time exceeds 30 minutes. Consider increasing Stride to reduce processing time.
           </div>
@@ -315,6 +410,16 @@ export class ImportSettingsPanel {
       estimateTime: this.container.querySelector("#estimate-time"),
       estimateNudge: this.container.querySelector("#estimate-nudge"),
       btnAnalyze: this.container.querySelector("#btn-analyze"),
+      btnLoadRfStory: this.container.querySelector("#btn-load-rf-story"),
+      rfMeta: this.container.querySelector("#import-rf-meta"),
+      rfStoryName: this.container.querySelector("#import-rf-story-name"),
+      rfPresetSelect: this.container.querySelector("#select-rf-preset"),
+      rfChapterSelect: this.container.querySelector("#select-rf-chapter"),
+      rfScopeNote: this.container.querySelector("#import-rf-scope-note"),
+      rfPassEstimates: this.container.querySelector("#rf-pass-estimates"),
+      rfPassEstimatesList: this.container.querySelector("#rf-pass-estimates-list"),
+      rfPassEstimatesTotal: this.container.querySelector("#rf-pass-estimates-total"),
+      btnAnalyzeRfChapter: this.container.querySelector("#btn-analyze-rf-chapter"),
       pasteTextArea: this.container.querySelector("#paste-text-area"),
       btnAnalyzeText: this.container.querySelector("#btn-analyze-text"),
     };
@@ -388,9 +493,315 @@ export class ImportSettingsPanel {
       this._startAnalysis();
     });
 
+    this._els.btnLoadRfStory.addEventListener("click", () => {
+      void this._openRfStoryDialog();
+    });
+
+    this._els.rfPresetSelect.addEventListener("change", () => {
+      void this._onRfPresetSelected();
+    });
+
+    this._els.rfChapterSelect.addEventListener("change", () => {
+      void this._onRfChapterSelected();
+    });
+
+    this._els.btnAnalyzeRfChapter.addEventListener("click", () => {
+      void this._startRfChapterAnalysis();
+    });
+
     this._els.btnAnalyzeText.addEventListener("click", () => {
       this._startTextAnalysis();
     });
+  }
+
+  /** Load persisted app settings (last-used RF preset). */
+  async _loadAppSettings() {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) return;
+
+    try {
+      const settings = await invoke("get_app_settings");
+      const preset = settings?.rf_chapter_preset;
+      if (preset && RF_CHAPTER_PRESETS[preset]) {
+        this.rfChapterPreset = preset;
+        if (this._els?.rfPresetSelect) {
+          this._els.rfPresetSelect.value = preset;
+        }
+        this._applyRfPresetSliders(preset, { persist: false });
+      }
+    } catch (err) {
+      console.warn("get_app_settings failed:", err);
+    }
+  }
+
+  /**
+   * @param {string} presetId
+   * @param {{ persist?: boolean }} [options]
+   */
+  _applyRfPresetSliders(presetId, options = {}) {
+    const preset = RF_CHAPTER_PRESETS[presetId];
+    if (!preset) return;
+
+    this.rfChapterPreset = presetId;
+    if (this._els?.rfPresetSelect && this._els.rfPresetSelect.value !== presetId) {
+      this._els.rfPresetSelect.value = presetId;
+    }
+
+    const { windowSize, stride } = preset.displayPass;
+    this._strideManuallySet = true;
+    this._els.phraseLength.value = windowSize;
+    this._els.inputPhraseLength.value = windowSize;
+    this._els.stride.value = stride;
+    this._els.inputStride.value = stride;
+    this._checkTokensWarning();
+    this._scheduleEstimateUpdate();
+
+    if (options.persist !== false) {
+      void this._persistRfPreset(presetId);
+    }
+  }
+
+  async _onRfPresetSelected() {
+    const presetId = this._els.rfPresetSelect.value;
+    if (!RF_CHAPTER_PRESETS[presetId]) return;
+    this._applyRfPresetSliders(presetId);
+  }
+
+  async _persistRfPreset(presetId) {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) return;
+
+    try {
+      await invoke("save_app_settings", { rfChapterPreset: presetId });
+    } catch (err) {
+      console.warn("save_app_settings failed:", err);
+    }
+  }
+
+  /** Render per-pass window counts for the selected RF chapter + preset. */
+  _renderRfPassEstimates(estimate) {
+    if (!this._els.rfPassEstimates || !this._els.rfPassEstimatesList) return;
+
+    if (!estimate?.passes?.length) {
+      this._els.rfPassEstimates.hidden = true;
+      this._els.rfPassEstimatesList.innerHTML = "";
+      this._els.rfPassEstimatesTotal.textContent = "—";
+      return;
+    }
+
+    this._els.rfPassEstimates.hidden = false;
+    this._els.rfPassEstimatesList.innerHTML = estimate.passes
+      .map((pass) => {
+        const scopeLabel = pass.scope === "act" ? "act" : "chapter";
+        return `
+          <div class="estimate-row rf-pass-estimate-row">
+            <span class="estimate-label">${pass.name} (${scopeLabel} ${pass.window_size}/${pass.stride})</span>
+            <span class="estimate-value">${pass.window_count.toLocaleString()}</span>
+          </div>
+        `;
+      })
+      .join("");
+    this._els.rfPassEstimatesTotal.textContent = estimate.total_windows.toLocaleString();
+  }
+
+  async _updateRfPassEstimates() {
+    if (!this.rfStoryPath || !this.rfChapter) {
+      this._lastRfPassEstimate = null;
+      this._renderRfPassEstimates(null);
+      return;
+    }
+
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._renderRfPassEstimates(null);
+      return;
+    }
+
+    try {
+      /** @type {RfChapterPassEstimate} */
+      const estimate = await invoke("estimate_rf_chapter", {
+        storyPath: this.rfStoryPath,
+        chapter: this.rfChapter,
+        preset: this.rfChapterPreset,
+      });
+      this._lastRfPassEstimate = estimate;
+      this._renderRfPassEstimates(estimate);
+    } catch (err) {
+      console.warn("estimate_rf_chapter failed:", err);
+      this._lastRfPassEstimate = null;
+      this._renderRfPassEstimates(null);
+    }
+  }
+
+  /** Open a native folder picker for a Romance Factory story directory. */
+  async _openRfStoryDialog() {
+    const dialogOptions = {
+      multiple: false,
+      directory: true,
+      title: "Load Romance Factory Story",
+    };
+
+    try {
+      const openDialog =
+        window.__TAURI__?.dialog?.open ??
+        (window.__TAURI_INTERNALS__?.invoke
+          ? (opts) =>
+              window.__TAURI_INTERNALS__.invoke("plugin:dialog|open", {
+                options: opts,
+              })
+          : null);
+
+      if (!openDialog) {
+        console.warn("Tauri dialog API not available");
+        return;
+      }
+
+      const selected = await openDialog(dialogOptions);
+      if (!selected) return;
+
+      const storyPath = typeof selected === "string" ? selected : selected.path;
+      if (!storyPath) return;
+
+      await this._setRfStory(storyPath);
+    } catch (err) {
+      console.error("RF story dialog failed:", err);
+      this._showAnalysisError(err);
+    }
+  }
+
+  /**
+   * @param {string} storyPath
+   */
+  async _setRfStory(storyPath) {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    this.rfStoryPath = storyPath;
+    this.rfChapter = null;
+    this._rfChapters = [];
+
+    const storyName = storyPath.split(/[/\\]/).pop() || storyPath;
+    this._els.rfStoryName.textContent = storyName;
+    this._els.rfStoryName.title = storyPath;
+    this._els.rfMeta.hidden = false;
+    this._els.rfScopeNote.textContent = "";
+    this._els.btnAnalyzeRfChapter.disabled = true;
+
+    const select = this._els.rfChapterSelect;
+    select.innerHTML = '<option value="">Select chapter…</option>';
+
+    try {
+      const list = await invoke("list_rf_chapters", { storyPath });
+      this._rfChapters = list?.chapters || [];
+      for (const ch of this._rfChapters) {
+        const opt = document.createElement("option");
+        opt.value = String(ch);
+        opt.textContent = `Chapter ${ch}`;
+        select.appendChild(opt);
+      }
+      if (this._rfChapters.length === 0) {
+        this._els.rfScopeNote.textContent =
+          "No chapters found — add drafts/chapter_XX_act_YY.json files.";
+      }
+    } catch (err) {
+      console.error("list_rf_chapters failed:", err);
+      this._showAnalysisError(err);
+    }
+  }
+
+  async _onRfChapterSelected() {
+    const raw = this._els.rfChapterSelect.value;
+    if (!raw || !this.rfStoryPath) {
+      this.rfChapter = null;
+      this._els.rfScopeNote.textContent = "";
+      this._els.btnAnalyzeRfChapter.disabled = true;
+      return;
+    }
+
+    const chapter = Number(raw);
+    this.rfChapter = chapter;
+    this._els.btnAnalyzeRfChapter.disabled = false;
+
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) return;
+
+    try {
+      const scope = await invoke("build_rf_chapter_scope", {
+        storyPath: this.rfStoryPath,
+        chapter,
+      });
+      this._els.rfScopeNote.textContent =
+        `${scope.act_count} act(s), ${scope.paragraph_count} paragraph(s) — ` +
+        `${scope.text.length.toLocaleString()} chars`;
+      await this._updateRfPassEstimates();
+    } catch (err) {
+      console.warn("build_rf_chapter_scope failed:", err);
+      this._els.rfScopeNote.textContent = this._formatInvokeError(err);
+      this._els.btnAnalyzeRfChapter.disabled = true;
+    }
+  }
+
+  /** Analyze the selected RF chapter with pipeline multi-pass + act-scoped grid pages. */
+  async _startRfChapterAnalysis() {
+    if (!this.rfStoryPath || !this.rfChapter) {
+      this._showAnalysisError("Select an RF story and chapter first.");
+      return;
+    }
+
+    const settings = this.getSettings();
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (!invoke) {
+      this._showAnalysisError("Tauri runtime not available (running in a browser?)");
+      return;
+    }
+
+    this._savedSettings = { ...settings };
+    this._els.btnAnalyzeRfChapter.disabled = true;
+
+    try {
+      this._showProgressView("");
+    } catch (renderErr) {
+      console.error("Failed to render progress view:", renderErr);
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      return;
+    }
+
+    try {
+      window.currentJobId = "";
+      const payload = await invoke("analyze_rf_chapter", {
+        storyPath: this.rfStoryPath,
+        chapter: this.rfChapter,
+        preset: settings.rfChapterPreset,
+        windowSize: settings.phraseLength,
+        stride: settings.stride,
+        tokensPerPage: settings.tokensPerPage,
+        minRepetitions: settings.minRepetitions,
+        minSamples: settings.minSamples,
+        enableHdbscan: settings.enableHdbscan,
+        linkSubphrases: settings.linkSubphrases,
+      });
+
+      if (payload?.job_id) {
+        if (this._progressView) {
+          this._progressView.setJobId(payload.job_id);
+        }
+        const label = `${this.rfStoryPath.split(/[/\\]/).pop() || "story"} ch${this.rfChapter}`;
+        this.filePath = this.rfStoryPath;
+        this.isPdf = false;
+        this._els.fileName.textContent = label;
+        this._els.fileName.title = this.rfStoryPath;
+        await applyVisualizationPayload(payload);
+      }
+    } catch (err) {
+      console.error("analyze_rf_chapter failed:", err);
+      this._showAnalysisError(err);
+    } finally {
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      await this._restoreSettingsView();
+    }
   }
 
   /** Open a native file dialog to select a document */
@@ -523,6 +934,7 @@ export class ImportSettingsPanel {
     this._estimateTimer = setTimeout(() => {
       this._estimateTimer = null;
       this._updateEstimate();
+      void this._updateRfPassEstimates();
     }, 100);
   }
 
@@ -812,6 +1224,14 @@ export class ImportSettingsPanel {
       this._els.fileName.title = this.filePath;
     }
 
+    if (this.rfStoryPath) {
+      void this._restoreRfSection();
+    }
+
+    if (this.rfChapterPreset && this._els.rfPresetSelect) {
+      this._els.rfPresetSelect.value = this.rfChapterPreset;
+    }
+
     // Restore saved settings if available
     if (this._savedSettings) {
       this._els.tokensPerPage.value = this._savedSettings.tokensPerPage;
@@ -905,6 +1325,31 @@ export class ImportSettingsPanel {
     this._progressView.showResumeBanner(partialJob);
   }
 
+  /** Restore RF story picker state after progress view teardown. */
+  async _restoreRfSection() {
+    if (!this.rfStoryPath || !this._els.rfMeta) return;
+    this._els.rfMeta.hidden = false;
+    const storyName = this.rfStoryPath.split(/[/\\]/).pop() || this.rfStoryPath;
+    this._els.rfStoryName.textContent = storyName;
+    this._els.rfStoryName.title = this.rfStoryPath;
+
+    const select = this._els.rfChapterSelect;
+    select.innerHTML = '<option value="">Select chapter…</option>';
+    for (const ch of this._rfChapters) {
+      const opt = document.createElement("option");
+      opt.value = String(ch);
+      opt.textContent = `Chapter ${ch}`;
+      select.appendChild(opt);
+    }
+    if (this.rfChapter) {
+      select.value = String(this.rfChapter);
+      this._els.btnAnalyzeRfChapter.disabled = false;
+      await this._onRfChapterSelected();
+    } else {
+      this._renderRfPassEstimates(null);
+    }
+  }
+
   /**
    * Get current settings values
    * @returns {Object}
@@ -919,6 +1364,7 @@ export class ImportSettingsPanel {
       enableHdbscan: this._els.enableHdbscan.checked,
       linkSubphrases: this._els.linkSubphrases.checked,
       chapterBreak: this._els.chapterBreak.value.trim(),
+      rfChapterPreset: this.rfChapterPreset,
     };
   }
 

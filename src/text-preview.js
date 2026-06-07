@@ -27,6 +27,7 @@ export class TextPreviewPanel {
     this._documentText = "";
     this._activeClusterId = null;
     this._payload = null;
+    this._scopeManifest = null;
     this._buildUI();
   }
 
@@ -65,6 +66,7 @@ export class TextPreviewPanel {
     this._payload = payload;
     this._documentText = payload.document_text || "";
     this._highlights = payload.highlights || [];
+    this._scopeManifest = payload.scope_manifest || null;
     this._render();
   }
 
@@ -79,6 +81,7 @@ export class TextPreviewPanel {
     this._documentText = "";
     this._highlights = [];
     this._activeClusterId = null;
+    this._scopeManifest = null;
     this._body.textContent = "Run analysis to preview highlighted spans.";
   }
 
@@ -97,14 +100,59 @@ export class TextPreviewPanel {
     const frag = document.createDocumentFragment();
     let cursor = 0;
 
+    const actStarts = new Set(
+      (this._scopeManifest?.acts || [])
+        .map((a) => a.scope_char_start)
+        .filter((start) => start > 0),
+    );
+
+    const emitActBoundary = (offset) => {
+      if (!actStarts.has(offset)) return;
+      const act = (this._scopeManifest?.acts || []).find(
+        (a) => a.scope_char_start === offset,
+      );
+      const div = document.createElement("div");
+      div.className = "text-act-boundary";
+      div.setAttribute("role", "separator");
+      div.textContent = act ? `— Act ${act.act} —` : "— Act boundary —";
+      frag.appendChild(div);
+    };
+
+    const appendProseWithActBoundaries = (from, to) => {
+      let pos = from;
+      const boundaries = [...actStarts]
+        .filter((b) => b > from && b < to)
+        .sort((a, b) => a - b);
+      for (const boundary of boundaries) {
+        if (boundary > pos) {
+          frag.appendChild(
+            document.createTextNode(this._documentText.slice(pos, boundary)),
+          );
+        }
+        emitActBoundary(boundary);
+        pos = boundary;
+      }
+      if (pos < to) {
+        frag.appendChild(document.createTextNode(this._documentText.slice(pos, to)));
+      }
+    };
+
+    if (this._highlights.length === 0) {
+      if (actStarts.size > 0) {
+        appendProseWithActBoundaries(0, this._documentText.length);
+      } else {
+        frag.appendChild(document.createTextNode(this._documentText));
+      }
+      this._body.appendChild(frag);
+      return;
+    }
+
     for (const highlight of this._highlights) {
       const start = highlight.doc_char_start;
       const end = highlight.doc_char_end;
 
       if (start > cursor) {
-        frag.appendChild(
-          document.createTextNode(this._documentText.slice(cursor, start)),
-        );
+        appendProseWithActBoundaries(cursor, start);
       }
 
       const mark = document.createElement("mark");
@@ -127,9 +175,7 @@ export class TextPreviewPanel {
     }
 
     if (cursor < this._documentText.length) {
-      frag.appendChild(
-        document.createTextNode(this._documentText.slice(cursor)),
-      );
+      appendProseWithActBoundaries(cursor, this._documentText.length);
     }
 
     this._body.appendChild(frag);
@@ -172,12 +218,13 @@ export class TextPreviewPanel {
 export async function applyVisualizationPayload(payload) {
   window.currentJobId = payload.job_id;
   window.currentVisualizationPayload = payload;
+  window.currentScopeManifest = payload.scope_manifest || null;
 
   const grid = window.gridRenderer;
   const pageCount = payload.pages?.length || payload.page_rasters?.length || 0;
 
   if (grid && pageCount > 0) {
-    grid.initGrid(pageCount);
+    grid.initGrid(pageCount, payload.scope_manifest || null);
     for (const raster of payload.page_rasters || []) {
       await grid.updatePage(raster.page, raster.canvas_rgba_b64);
     }

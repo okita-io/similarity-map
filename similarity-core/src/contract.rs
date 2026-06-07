@@ -133,30 +133,13 @@ pub fn build_scope_manifest(
         let act_doc_start = doc_char_offset + act_scope_start;
         let act_doc_end = doc_char_offset + act_scope_end;
 
-        let mut paragraphs = Vec::new();
-        let mut para_num = 0u32;
-        let mut offset_in_act = 0usize;
-        for line in act_slice.split('\n') {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                offset_in_act += line.len() + 1;
-                continue;
-            }
-            let trimmed_start = line.find(trimmed).unwrap_or(0);
-            let para_offset = offset_in_act + trimmed_start;
-            para_num += 1;
-            let para_len = trimmed.len() as u32;
-            let para_scope_start = act_scope_start + para_offset as u32;
-            paragraphs.push(ParagraphSpan {
-                paragraph_index: para_num,
-                segment_id: format_segment_id(chapter, act_num, para_num),
-                scope_char_start: para_scope_start,
-                scope_char_end: para_scope_start + para_len,
-                doc_char_start: doc_char_offset + para_scope_start,
-                doc_char_end: doc_char_offset + para_scope_start + para_len,
-            });
-            offset_in_act += line.len() + 1;
-        }
+        let paragraphs = parse_act_paragraphs(
+            chapter,
+            act_num,
+            act_slice,
+            act_scope_start,
+            doc_char_offset,
+        );
 
         acts.push(ScopeSegment {
             act: act_num,
@@ -171,6 +154,87 @@ pub fn build_scope_manifest(
     }
 
     ScopeManifest { chapter, acts }
+}
+
+/// Paragraph index for one act slice (does not split on `\n\n` act boundaries).
+pub fn parse_act_paragraphs(
+    chapter: u32,
+    act_num: u32,
+    act_slice: &str,
+    act_scope_start: u32,
+    doc_char_offset: u32,
+) -> Vec<ParagraphSpan> {
+    let mut paragraphs = Vec::new();
+    let mut para_num = 0u32;
+    let mut offset_in_act = 0usize;
+    for line in act_slice.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            offset_in_act += line.len() + 1;
+            continue;
+        }
+        let trimmed_start = line.find(trimmed).unwrap_or(0);
+        let para_offset = offset_in_act + trimmed_start;
+        para_num += 1;
+        let para_len = trimmed.len() as u32;
+        let para_scope_start = act_scope_start + para_offset as u32;
+        paragraphs.push(ParagraphSpan {
+            paragraph_index: para_num,
+            segment_id: format_segment_id(chapter, act_num, para_num),
+            scope_char_start: para_scope_start,
+            scope_char_end: para_scope_start + para_len,
+            doc_char_start: doc_char_offset + para_scope_start,
+            doc_char_end: doc_char_offset + para_scope_start + para_len,
+        });
+        offset_in_act += line.len() + 1;
+    }
+    paragraphs
+}
+
+/// Assemble chapter prose and scope manifest from ordered RF act draft bodies.
+///
+/// Acts are joined with `\n\n` (matching RF `_reassemble_chapter_json_from_outline_acts`).
+/// Each act file is indexed independently so internal `\n\n` does not create false act splits.
+pub fn assemble_rf_chapter_scope(
+    chapter: u32,
+    act_bodies: &[(u32, String)],
+) -> Result<(String, ScopeManifest), crate::types::ValidationError> {
+    if act_bodies.is_empty() {
+        return Err(crate::types::ValidationError {
+            field: "acts".into(),
+            message: format!("chapter {chapter} has no act draft text"),
+        });
+    }
+
+    let mut chapter_text = String::new();
+    let mut acts = Vec::with_capacity(act_bodies.len());
+
+    for (idx, (act_num, body)) in act_bodies.iter().enumerate() {
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            return Err(crate::types::ValidationError {
+                field: format!("act_{act_num:02}"),
+                message: "act draft text is empty".into(),
+            });
+        }
+        if idx > 0 {
+            chapter_text.push_str("\n\n");
+        }
+        let scope_start = chapter_text.len() as u32;
+        chapter_text.push_str(trimmed);
+        let scope_end = chapter_text.len() as u32;
+        let paragraphs = parse_act_paragraphs(chapter, *act_num, trimmed, scope_start, 0);
+        acts.push(ScopeSegment {
+            act: *act_num,
+            scope_char_start: scope_start,
+            scope_char_end: scope_end,
+            doc_char_start: scope_start,
+            doc_char_end: scope_end,
+            paragraphs,
+        });
+    }
+
+    Ok((chapter_text, ScopeManifest { chapter, acts }))
 }
 
 /// Convert a legacy [`RepetitionReport`] into v1 with locations and cluster enrichments.

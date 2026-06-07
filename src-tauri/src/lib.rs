@@ -1,3 +1,4 @@
+pub mod app_settings;
 pub mod commands;
 pub mod display_state;
 pub mod events;
@@ -28,6 +29,12 @@ pub fn run() {
             get_repetition_report,
             get_visualization_payload,
             analyze_text,
+            list_rf_chapters,
+            build_rf_chapter_scope,
+            analyze_rf_chapter,
+            estimate_rf_chapter,
+            get_app_settings,
+            save_app_settings,
             save_display_state,
             list_document_results,
             save_document_result,

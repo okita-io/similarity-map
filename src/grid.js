@@ -24,9 +24,11 @@ export class GridRenderer {
   /**
    * Initialise the grid with empty (transparent) canvas cells.
    * @param {number} pageCount - Total number of pages in the document
+   * @param {object|null} [scopeManifest] - RF scope manifest (one page per act)
    */
-  initGrid(pageCount) {
+  initGrid(pageCount, scopeManifest = null) {
     this._pageCount = pageCount;
+    this._scopeManifest = scopeManifest;
     // Clear any existing content
     this._container.innerHTML = "";
     this._canvases.clear();
@@ -41,6 +43,12 @@ export class GridRenderer {
       canvas.height = CELL_SIZE;
       canvas.dataset.page = String(i);
       canvas.setAttribute("aria-label", `Page ${i}`);
+      if (scopeManifest?.acts?.[i - 1]) {
+        const act = scopeManifest.acts[i - 1];
+        canvas.classList.add("grid-act-page");
+        canvas.dataset.act = String(act.act);
+        canvas.title = `Act ${act.act} (page ${i})`;
+      }
       // Fill with a baseline background so "processed but empty" is visible even
       // if no page-ready events are received (or pixels are fully masked out).
       const ctx = canvas.getContext("2d");

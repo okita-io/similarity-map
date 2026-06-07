@@ -26,8 +26,12 @@ These are **not** in the startup update script; install once if missing:
 ### Environment variables
 
 ```bash
-export ORT_DYLIB_PATH=/usr/local/lib/libonnxruntime.so
+export ORT_DYLIB_PATH=/usr/local/lib/libonnxruntime.so   # or Homebrew path on macOS
+export SIMILARITY_MAP_MODEL_DIR=/path/to/models            # headless / CI
+export SIMILARITY_MAP_CI=1                                 # enable ONNX integration pytest
 ```
+
+See README → **Headless pipeline & ONNX Runtime** for install paths and troubleshooting.
 
 Optional build-time: `PROTOC` if `protoc` is not on `PATH`.
 
