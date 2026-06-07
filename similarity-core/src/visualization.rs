@@ -8,7 +8,9 @@ use crate::analysis::AnalysisParams;
 use crate::centroid::WindowData;
 use crate::job_data::{load_job_render_data, parse_window_data_from_batches};
 use crate::importer::{import_document, ImportDocumentParams};
-use crate::report::{build_repetition_report, pages_to_document_text, RepetitionReport};
+use crate::report::{
+    build_repetition_report_with_manifest, pages_to_document_text, RepetitionReport, SpanLocation,
+};
 use crate::rasterizer::{encode_canvas_base64, rasterize_page};
 use crate::report::ScopeManifest;
 use crate::contract::AnalysisOutput;
@@ -38,6 +40,9 @@ pub struct TextHighlight {
     pub hue: f32,
     pub similarity_to_centroid: f32,
     pub text: String,
+    /// Resolved chapter/act/paragraph location when a scope manifest was used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<SpanLocation>,
 }
 
 /// Rasterized page preview at a specific tolerance/gamma.
@@ -136,6 +141,7 @@ pub fn build_text_highlights(
             hue,
             similarity_to_centroid: cluster.canonical.similarity_to_centroid,
             text: cluster.canonical.text.clone(),
+            location: cluster.canonical.location.clone(),
         });
 
         for duplicate in &cluster.duplicates {
@@ -149,6 +155,7 @@ pub fn build_text_highlights(
                 hue,
                 similarity_to_centroid: duplicate.similarity_to_centroid,
                 text: duplicate.text.clone(),
+                location: duplicate.location.clone(),
             });
         }
     }
@@ -172,11 +179,12 @@ pub fn build_visualization_payload(
     analysis_output: Option<AnalysisOutput>,
 ) -> VisualizationPayload {
     let document_text = pages_to_document_text(pages);
-    let repetition_report = build_repetition_report(
+    let repetition_report = build_repetition_report_with_manifest(
         job_id,
         &document_text,
         window_data,
         expand_to_sentences,
+        scope_manifest.as_ref(),
     );
     let highlights = build_text_highlights(pages, &repetition_report, cluster_registry);
 
@@ -354,5 +362,56 @@ mod tests {
         assert_eq!(highlights.len(), 2);
         assert_eq!(highlights[0].role, HighlightRole::Canonical);
         assert_eq!(highlights[1].role, HighlightRole::Duplicate);
+    }
+
+    #[test]
+    fn highlights_include_span_location_when_manifest_present() {
+        use crate::contract::build_scope_manifest;
+        use crate::report::build_repetition_report_with_manifest;
+
+        let text = "Alpha. Beta.\n\nGamma.";
+        let pages = vec![Page {
+            page_num: 1,
+            text: text.to_string(),
+            char_offset_in_doc: 0,
+            char_count: text.len() as u32,
+            token_count: 3,
+            pagination_mode: crate::types::PaginationMode::Token,
+        }];
+        let manifest = build_scope_manifest(1, text, 0);
+        let windows = vec![
+            WindowData {
+                window_id: "w1".into(),
+                window_index: 0,
+                page: 1,
+                cluster_id: 1,
+                embedding: vec![1.0, 0.0],
+                text: "Alpha.".into(),
+                doc_char_start: 0,
+                doc_char_end: 6,
+            },
+            WindowData {
+                window_id: "w2".into(),
+                window_index: 1,
+                page: 1,
+                cluster_id: 1,
+                embedding: vec![0.9, 0.1],
+                text: "Beta.".into(),
+                doc_char_start: 7,
+                doc_char_end: 12,
+            },
+        ];
+        let registry = crate::centroid::build_cluster_registry(&windows);
+        let report = build_repetition_report_with_manifest("job", text, &windows, false, Some(&manifest));
+        let highlights = build_text_highlights(&pages, &report, &registry);
+        assert!(highlights.iter().all(|h| h.location.is_some()));
+        assert!(
+            highlights[0]
+                .location
+                .as_ref()
+                .unwrap()
+                .segment_id
+                .starts_with("ch01_")
+        );
     }
 }
