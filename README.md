@@ -160,6 +160,8 @@ This produces platform-specific installers (.dmg on macOS, .deb/.AppImage on Lin
 
 ```
 similarity-map/
+├── similarity-core/        # Portable analysis library
+├── similarity-cli/         # Headless CLI (AnalysisOutput JSON stdout)
 ├── src/                    # Frontend (Vanilla JS + CSS)
 │   ├── index.html
 │   ├── main.js
@@ -215,6 +217,47 @@ For the full technical specification (data model, IPC commands, clustering param
 ### Romance Factory JSON export (RepetitionReport v1)
 
 Pipeline-consumable analysis output for the RF surgical editor is defined in [`.kiro/specs/similarity-map/integration-contract.md`](./.kiro/specs/similarity-map/integration-contract.md). Rust types: `similarity-core/src/contract.rs`. JSON Schema: `similarity-core/schemas/analysis_output_v1.schema.json`. Example fixture: `similarity-core/fixtures/analysis_output_v1.example.json`.
+
+### Headless CLI (`similarity-cli`)
+
+For debugging and pre-PyO3 pipeline integration, run repetition analysis without the Tauri UI:
+
+```bash
+cd similarity-map
+
+# Romance Factory story chapter (loads drafts/chapter_NN.json or chapters/chapter_NN.md)
+cargo run -p similarity-cli -- analyze \
+  --story-path ../stories/my_novel \
+  --chapter 1 \
+  --pass-config similarity-cli/fixtures/pass_config_smoke.yaml \
+  --test-embedder   # omit in production; use ONNX model instead
+
+# JSON stdin: { "text", "scope_manifest", "params" }
+cargo run -p similarity-cli -- analyze --test-embedder < request.json
+
+# RF-style multi-pass bundle (YAML excerpt under generate:similarity_map:)
+cargo run -p similarity-cli -- analyze \
+  --story-path ../stories/my_novel \
+  --chapter 3 \
+  --pass-config similarity-cli/fixtures/pass_config_smoke.yaml \
+  --test-embedder > chapter_03.repetition.json
+```
+
+**Output:** pretty-printed `AnalysisOutput` v1 JSON on stdout (contract in `integration-contract.md`). Errors go to stderr.
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--story-path` + `--chapter` | Load RF chapter prose and build `scope_manifest` automatically |
+| `--input-file` | Read `{ text, scope_manifest, params }` JSON from a file |
+| `--pass-config` | YAML pass bundle (`min_repetitions`, `passes[]` with `window_size` / `stride`) |
+| `--expand-sentences` / `--no-expand-sentences` | Clip spans to sentence boundaries (default: expand) |
+| `--model-path` | ONNX model path (or set `SIMILARITY_MAP_MODEL_PATH`) |
+| `--window-size`, `--stride`, … | Single-pass overrides when `--pass-config` is omitted |
+
+**Production runs** require the `all-MiniLM-L6-v2` ONNX model (same as the desktop app). Point `--model-path` at the cached file or set `SIMILARITY_MAP_DATA_DIR` / `SIMILARITY_MAP_MODEL_PATH`.
+
 
 ## License
 

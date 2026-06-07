@@ -1,3 +1,3 @@
 [workspace]
-members = ["similarity-core", "src-tauri"]
+members = ["similarity-core", "similarity-cli", "src-tauri"]
 resolver = "2"
