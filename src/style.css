@@ -1314,6 +1314,93 @@ body {
   margin-top: 2px;
 }
 
+.detail-span-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.detail-span-item-focused {
+  border-color: #64b5f6;
+  box-shadow: 0 0 0 1px rgba(100, 181, 246, 0.35);
+}
+
+.detail-span-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.detail-role-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+.detail-role-canonical {
+  color: #a5d6a7;
+  background: rgba(76, 175, 80, 0.18);
+  border: 1px solid rgba(76, 175, 80, 0.35);
+}
+
+.detail-role-duplicate {
+  color: #ffcc80;
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+}
+
+.detail-location-breadcrumb {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+
+.detail-location-fields {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 4px 0 0;
+  font-size: 10px;
+}
+
+.detail-location-fields dt {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.detail-location-fields dd {
+  margin: 0;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.detail-segment-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: #90caf9;
+}
+
+.detail-span-link {
+  margin-top: 4px;
+}
+
+.detail-cluster-representative {
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.text-highlight-focused {
+  outline: 2px solid #64b5f6;
+  outline-offset: 2px;
+}
+
 
 /* === Model Download Banner === */
 

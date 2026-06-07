@@ -1,13 +1,36 @@
 // Detail Panel — side panel showing window excerpts, cluster info, counterpart links.
-// Triggered by macro-cell or sub-cell clicks.
+// Triggered by macro-cell or sub-cell clicks, or text-preview highlight inspection.
 // Calls get_page_detail via Tauri IPC and displays results grouped by cluster.
 
 const CELL_SIZE = 20;
 
 /**
+ * @typedef {Object} SpanLocation
+ * @property {number} chapter
+ * @property {number} act
+ * @property {number} paragraph_index
+ * @property {string} segment_id
+ * @property {number} sentence_index
+ */
+
+/**
+ * @typedef {Object} EditSpan
+ * @property {number} cluster_id
+ * @property {number} instance_id
+ * @property {number} doc_char_start
+ * @property {number} doc_char_end
+ * @property {string} text
+ * @property {number} similarity_to_centroid
+ * @property {SpanLocation|null} [location]
+ */
+
+/**
  * DetailPanel renders a side panel listing windows above Tolerance for a clicked cell,
  * grouped by cluster. Each entry shows window text excerpt, cluster hue indicator,
  * similarity score, and links to counterpart pages.
+ *
+ * Cluster inspection mode lists all spans in a cluster with SpanLocation fields,
+ * canonical/duplicate role badges, and scroll-to-span links in the text preview.
  *
  * The panel updates in-place on new cell clicks without close/reopen.
  * No action is taken for clicks on empty/below-threshold sub-cells.
@@ -21,6 +44,8 @@ export class DetailPanel {
    * @param {function} options.getJobId - Returns the current job_id string or null
    * @param {function} [options.onCounterpartClick] - Called when a counterpart link is clicked:
    *   (page: number, subCellRow: number, subCellCol: number) => void
+   * @param {function} [options.onSpanNavigate] - Called when a cluster span link is clicked:
+   *   (span: EditSpan, role: "canonical"|"duplicate") => void
    */
   constructor(container, options = {}) {
     this._container = container;
@@ -28,14 +53,20 @@ export class DetailPanel {
     this._getTolerance = options.getTolerance || (() => 0.88);
     this._getJobId = options.getJobId || (() => null);
     this._onCounterpartClick = options.onCounterpartClick || null;
+    this._onSpanNavigate = options.onSpanNavigate || null;
 
     this._visible = false;
     this._currentPage = null;
     this._currentRow = null;
     this._currentCol = null;
+    /** @type {object|null} */
+    this._visualizationPayload = null;
+    /** @type {number|null} */
+    this._activeClusterId = null;
 
     this._panelEl = null;
     this._headerEl = null;
+    this._titleEl = null;
     this._contentEl = null;
 
     this._handleGridClick = this._handleGridClick.bind(this);
@@ -61,6 +92,7 @@ export class DetailPanel {
     const title = document.createElement("span");
     title.className = "detail-panel-title";
     title.textContent = "Detail";
+    this._titleEl = title;
     this._headerEl.appendChild(title);
 
     const closeBtn = document.createElement("button");
@@ -130,6 +162,218 @@ export class DetailPanel {
     }
 
     return { row, col };
+  }
+
+  /**
+   * Store the latest visualization payload for cluster inspection.
+   * @param {object|null} payload
+   */
+  setVisualizationPayload(payload) {
+    this._visualizationPayload = payload || null;
+  }
+
+  /**
+   * Show cluster inspection with SpanLocation fields for each span.
+   * @param {number} clusterId
+   * @param {EditSpan} [focusSpan] - Span to emphasize (e.g. from highlight click)
+   */
+  showCluster(clusterId, focusSpan) {
+    const payload = this._visualizationPayload || window.currentVisualizationPayload;
+    if (!payload?.repetition_report?.clusters) {
+      return;
+    }
+
+    const cluster = payload.repetition_report.clusters.find(
+      (entry) => entry.cluster_id === clusterId,
+    );
+    if (!cluster) {
+      return;
+    }
+
+    this._activeClusterId = clusterId;
+    this._currentPage = null;
+    this._currentRow = null;
+    this._currentCol = null;
+
+    this._renderClusterInspection(cluster, focusSpan);
+    this.show();
+  }
+
+  /**
+   * @private
+   * @param {object} cluster
+   * @param {EditSpan} [focusSpan]
+   */
+  _renderClusterInspection(cluster, focusSpan) {
+    this._contentEl.innerHTML = "";
+    if (this._titleEl) {
+      this._titleEl.textContent = `Cluster ${cluster.cluster_id}`;
+    }
+
+    const sectionHeader = document.createElement("div");
+    sectionHeader.className = "detail-section-header";
+
+    const pageLabel = document.createElement("div");
+    pageLabel.className = "detail-page-label";
+    pageLabel.textContent = `${cluster.instance_count} instances · ${cluster.spans?.length ?? 0} spans`;
+    sectionHeader.appendChild(pageLabel);
+
+    if (cluster.representative_text) {
+      const rep = document.createElement("div");
+      rep.className = "detail-meta detail-cluster-representative";
+      rep.textContent = this._truncateText(cluster.representative_text, 120);
+      sectionHeader.appendChild(rep);
+    }
+
+    this._contentEl.appendChild(sectionHeader);
+
+    const spansSection = document.createElement("div");
+    spansSection.className = "detail-matches-section";
+
+    const spansTitle = document.createElement("div");
+    spansTitle.className = "detail-matches-title";
+    spansTitle.textContent = "Spans";
+    spansSection.appendChild(spansTitle);
+
+    const spansList = document.createElement("div");
+    spansList.className = "detail-matches-list detail-spans-list";
+
+    const spans = cluster.spans?.length
+      ? cluster.spans
+      : [cluster.canonical, ...(cluster.duplicates || [])];
+
+    for (const span of spans) {
+      const role =
+        span.instance_id === cluster.canonical?.instance_id
+          ? "canonical"
+          : "duplicate";
+      const isFocused =
+        focusSpan &&
+        span.doc_char_start === focusSpan.doc_char_start &&
+        span.instance_id === focusSpan.instance_id;
+      spansList.appendChild(
+        this._createClusterSpanItem(span, role, cluster.cluster_id, isFocused),
+      );
+    }
+
+    spansSection.appendChild(spansList);
+    this._contentEl.appendChild(spansSection);
+    this._contentEl.scrollTop = 0;
+  }
+
+  /**
+   * @private
+   * @param {EditSpan} span
+   * @param {"canonical"|"duplicate"} role
+   * @param {number} clusterId
+   * @param {boolean} [focused]
+   * @returns {HTMLElement}
+   */
+  _createClusterSpanItem(span, role, clusterId, focused = false) {
+    const item = document.createElement("div");
+    item.className = "detail-match-item detail-span-item";
+    if (focused) {
+      item.classList.add("detail-span-item-focused");
+    }
+
+    const header = document.createElement("div");
+    header.className = "detail-span-header";
+
+    const badge = document.createElement("span");
+    badge.className = `detail-role-badge detail-role-${role}`;
+    badge.textContent = role === "canonical" ? "Keep" : "Duplicate";
+    header.appendChild(badge);
+
+    const simBadge = document.createElement("span");
+    simBadge.className = "detail-match-sim";
+    simBadge.textContent = span.similarity_to_centroid.toFixed(3);
+    header.appendChild(simBadge);
+
+    item.appendChild(header);
+
+    if (span.location) {
+      const breadcrumb = document.createElement("div");
+      breadcrumb.className = "detail-location-breadcrumb";
+      breadcrumb.textContent = this._formatLocationBreadcrumb(span.location);
+      item.appendChild(breadcrumb);
+
+      const fields = document.createElement("dl");
+      fields.className = "detail-location-fields";
+      this._appendLocationField(fields, "segment_id", span.location.segment_id);
+      this._appendLocationField(fields, "act", String(span.location.act));
+      this._appendLocationField(
+        fields,
+        "paragraph_index",
+        String(span.location.paragraph_index),
+      );
+      this._appendLocationField(
+        fields,
+        "sentence_index",
+        String(span.location.sentence_index),
+      );
+      item.appendChild(fields);
+    }
+
+    const link = document.createElement("a");
+    link.className = "detail-match-link detail-span-link";
+    link.href = "#";
+    link.textContent = span.location?.segment_id
+      ? `Go to ${span.location.segment_id}`
+      : "Go to span";
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (this._onSpanNavigate) {
+        this._onSpanNavigate(span, role);
+      }
+    });
+    item.appendChild(link);
+
+    const excerpt = document.createElement("div");
+    excerpt.className = "detail-match-excerpt";
+    excerpt.textContent = this._truncateText(span.text, 160);
+    item.appendChild(excerpt);
+
+    return item;
+  }
+
+  /**
+   * @private
+   * @param {SpanLocation} location
+   * @returns {string}
+   */
+  _formatLocationBreadcrumb(location) {
+    const parts = [];
+    if (location.chapter) {
+      parts.push(`Ch ${location.chapter}`);
+    }
+    if (location.act) {
+      parts.push(`Act ${location.act}`);
+    }
+    if (location.paragraph_index) {
+      parts.push(`¶${location.paragraph_index}`);
+    }
+    if (location.sentence_index) {
+      parts.push(`Sent ${location.sentence_index}`);
+    }
+    return parts.join(" · ");
+  }
+
+  /**
+   * @private
+   * @param {HTMLDListElement} dl
+   * @param {string} label
+   * @param {string} value
+   */
+  _appendLocationField(dl, label, value) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    if (label === "segment_id") {
+      dd.className = "detail-segment-id";
+    }
+    dl.appendChild(dt);
+    dl.appendChild(dd);
   }
 
   /**
@@ -203,6 +447,10 @@ export class DetailPanel {
    */
   _renderDetail(detail, page, row, col) {
     this._contentEl.innerHTML = "";
+    this._activeClusterId = null;
+    if (this._titleEl) {
+      this._titleEl.textContent = "Detail";
+    }
 
     // Header section with current window info
     const sectionHeader = document.createElement("div");
@@ -350,6 +598,7 @@ export class DetailPanel {
     this._currentPage = null;
     this._currentRow = null;
     this._currentCol = null;
+    this._activeClusterId = null;
   }
 
   /**

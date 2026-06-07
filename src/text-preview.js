@@ -1,6 +1,15 @@
 // Text preview with cluster span highlighting for tuning against RF output.
 
 /**
+ * @typedef {Object} SpanLocation
+ * @property {number} chapter
+ * @property {number} act
+ * @property {number} paragraph_index
+ * @property {string} segment_id
+ * @property {number} sentence_index
+ */
+
+/**
  * @typedef {Object} TextHighlight
  * @property {number} cluster_id
  * @property {number} instance_id
@@ -11,13 +20,14 @@
  * @property {number} hue
  * @property {number} similarity_to_centroid
  * @property {string} text
+ * @property {SpanLocation|null} [location]
  */
 
 export class TextPreviewPanel {
   /**
    * @param {HTMLElement} container
    * @param {Object} [options]
-   * @param {(page: number, clusterId: number) => void} [options.onHighlightClick]
+   * @param {(highlight: TextHighlight) => void} [options.onHighlightClick]
    */
   constructor(container, options = {}) {
     this.container = container;
@@ -74,6 +84,30 @@ export class TextPreviewPanel {
   setActiveCluster(clusterId) {
     this._activeClusterId = clusterId;
     this._render();
+  }
+
+  /**
+   * Scroll the preview to a span and briefly emphasize it.
+   * @param {number} docCharStart
+   * @param {number|null} [clusterId]
+   */
+  scrollToSpan(docCharStart, clusterId) {
+    if (clusterId != null) {
+      this._activeClusterId = clusterId;
+    }
+    this._render();
+
+    const mark = this._body.querySelector(
+      `mark[data-char-start="${docCharStart}"]`,
+    );
+    if (!mark) return;
+
+    mark.classList.add("text-highlight-focused");
+    mark.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    window.setTimeout(() => {
+      mark.classList.remove("text-highlight-focused");
+    }, 2000);
   }
 
   clear() {
@@ -163,12 +197,16 @@ export class TextPreviewPanel {
       mark.dataset.clusterId = String(highlight.cluster_id);
       mark.dataset.page = String(highlight.page);
       mark.dataset.role = highlight.role;
+      mark.dataset.charStart = String(highlight.doc_char_start);
       mark.style.setProperty("--highlight-hue", this._hueToCSS(highlight.hue));
-      mark.title = `Cluster ${highlight.cluster_id} · ${highlight.role} · page ${highlight.page} · sim ${highlight.similarity_to_centroid.toFixed(2)}`;
+      const locationHint = highlight.location?.segment_id
+        ? ` · ${highlight.location.segment_id}`
+        : "";
+      mark.title = `Cluster ${highlight.cluster_id} · ${highlight.role} · page ${highlight.page} · sim ${highlight.similarity_to_centroid.toFixed(2)}${locationHint}`;
       mark.textContent = this._documentText.slice(start, end);
       mark.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.onHighlightClick(highlight.page, highlight.cluster_id);
+        this.onHighlightClick(highlight);
       });
       frag.appendChild(mark);
       cursor = Math.max(cursor, end);
@@ -245,6 +283,11 @@ export async function applyVisualizationPayload(payload) {
   const textPreview = window.textPreviewPanel;
   if (textPreview) {
     textPreview.applyPayload(payload);
+  }
+
+  const detailPanel = window.detailPanel;
+  if (detailPanel) {
+    detailPanel.setVisualizationPayload(payload);
   }
 
   const resultsPanel = window.resultsPanel;

@@ -83,15 +83,21 @@ document.addEventListener("DOMContentLoaded", () => {
     getJobId: () => window.currentJobId || null,
     onCounterpartClick: (page, subCellRow, subCellCol) => {
       navigationController.navigateTo(page, subCellRow, subCellCol);
-    }
+    },
+    onSpanNavigate: (span) => {
+      window.textPreviewPanel?.scrollToSpan(span.doc_char_start, span.cluster_id);
+      window.detailPanel?.showCluster(span.cluster_id, span);
+    },
   });
   detailPanel.attachToGrid(container);
 
   const textPreviewContainer = document.getElementById("text-preview-container");
   const textPreviewPanel = new TextPreviewPanel(textPreviewContainer, {
-    onHighlightClick: (page, clusterId) => {
-      window.textPreviewPanel?.setActiveCluster(clusterId);
-      navigationController.navigateToPage(page);
+    onHighlightClick: (highlight) => {
+      textPreviewPanel.setActiveCluster(highlight.cluster_id);
+      textPreviewPanel.scrollToSpan(highlight.doc_char_start, highlight.cluster_id);
+      detailPanel.showCluster(highlight.cluster_id, highlight);
+      navigationController.navigateToPage(highlight.page);
     },
   });
 
