@@ -852,12 +852,74 @@ pub async fn build_rf_chapter_scope(
     similarity_core::build_rf_chapter_scope(std::path::Path::new(&story_path), chapter)
 }
 
-/// Analyze one RF chapter using the default multi-pass bundle (pipeline parity) plus UI visualization.
+/// Live window-count estimates per pass for an RF chapter preset.
+#[tauri::command]
+pub async fn estimate_rf_chapter(
+    story_path: String,
+    chapter: u32,
+    preset: String,
+) -> Result<similarity_core::RfChapterPassEstimate, AppError> {
+    use similarity_core::{estimate_rf_chapter_passes, load_rf_chapter, RfChapterPreset};
+
+    let preset = RfChapterPreset::parse(&preset).ok_or_else(|| {
+        AppError::Validation(similarity_core::types::ValidationError {
+            field: "preset".into(),
+            message: format!(
+                "Unknown RF chapter preset {preset:?}; expected act_fine, chapter_coarse, or full_multi_pass"
+            ),
+        })
+    })?;
+
+    let draft = load_rf_chapter(std::path::Path::new(&story_path), chapter)?;
+    estimate_rf_chapter_passes(&draft.text, &draft.scope_manifest, preset)
+}
+
+/// Load persisted app settings (RF preset, etc.).
+#[tauri::command]
+pub async fn get_app_settings(app_handle: tauri::AppHandle) -> Result<crate::app_settings::AppSettings, AppError> {
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Session(similarity_core::types::SessionError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+    Ok(crate::app_settings::load_app_settings(&app_data_dir))
+}
+
+/// Persist app settings (partial updates merge with on-disk values).
+#[tauri::command]
+pub async fn save_app_settings(
+    app_handle: tauri::AppHandle,
+    rf_chapter_preset: Option<String>,
+) -> Result<crate::app_settings::AppSettings, AppError> {
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Session(similarity_core::types::SessionError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let mut settings = crate::app_settings::load_app_settings(&app_data_dir);
+    if let Some(preset) = rf_chapter_preset {
+        if similarity_core::RfChapterPreset::parse(&preset).is_none() {
+            return Err(AppError::Validation(similarity_core::types::ValidationError {
+                field: "rf_chapter_preset".into(),
+                message: format!(
+                    "Unknown RF chapter preset {preset:?}; expected act_fine, chapter_coarse, or full_multi_pass"
+                ),
+            }));
+        }
+        settings.rf_chapter_preset = preset;
+    }
+    crate::app_settings::save_app_settings(&app_data_dir, &settings)?;
+    Ok(settings)
+}
+
+/// Analyze one RF chapter using a multi-pass preset bundle plus UI visualization.
 #[tauri::command]
 pub async fn analyze_rf_chapter(
     app_handle: tauri::AppHandle,
     story_path: String,
     chapter: u32,
+    preset: String,
     window_size: u32,
     stride: u32,
     tokens_per_page: Option<u32>,
@@ -868,9 +930,18 @@ pub async fn analyze_rf_chapter(
 ) -> Result<similarity_core::VisualizationPayload, AppError> {
     use similarity_core::{
         analyze_prose_multi_pass, build_visualization_payload, chapter_scope_from_manifest,
-        default_rf_multi_pass_config, load_rf_chapter, run_analysis_stages,
-        MultiPassInput, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
+        load_rf_chapter, multi_pass_config_for_preset, run_analysis_stages, MultiPassInput,
+        RfChapterPreset, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
     };
+
+    let preset_id = RfChapterPreset::parse(&preset).ok_or_else(|| {
+        AppError::Validation(similarity_core::types::ValidationError {
+            field: "preset".into(),
+            message: format!(
+                "Unknown RF chapter preset {preset:?}; expected act_fine, chapter_coarse, or full_multi_pass"
+            ),
+        })
+    })?;
 
     let story = std::path::Path::new(&story_path);
     let draft = load_rf_chapter(story, chapter)?;
@@ -912,7 +983,7 @@ pub async fn analyze_rf_chapter(
     let multi_input = MultiPassInput {
         text: draft.text.clone(),
         scope_manifest: draft.scope_manifest.clone(),
-        config: default_rf_multi_pass_config(),
+        config: multi_pass_config_for_preset(preset_id),
         chapter_scope: multi_scope,
         job_id: job_id.clone(),
     };
@@ -947,9 +1018,10 @@ pub async fn analyze_rf_chapter(
     crate::log_info!(
         app_handle,
         "command",
-        "analyze_rf_chapter complete: story={} chapter={} clusters={}",
+        "analyze_rf_chapter complete: story={} chapter={} preset={} clusters={}",
         story_path,
         chapter,
+        preset_id.as_id(),
         payload
             .analysis_output
             .as_ref()

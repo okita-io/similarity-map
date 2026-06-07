@@ -82,6 +82,157 @@ fn default_tokens_per_page() -> u32 {
     400
 }
 
+/// UI / pipeline preset identifiers for RF chapter multi-pass bundles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RfChapterPreset {
+    ActFine,
+    ChapterCoarse,
+    FullMultiPass,
+}
+
+impl RfChapterPreset {
+    pub fn parse(id: &str) -> Option<Self> {
+        match id.trim() {
+            "act_fine" => Some(Self::ActFine),
+            "chapter_coarse" => Some(Self::ChapterCoarse),
+            "full_multi_pass" => Some(Self::FullMultiPass),
+            _ => None,
+        }
+    }
+
+    pub fn as_id(self) -> &'static str {
+        match self {
+            Self::ActFine => "act_fine",
+            Self::ChapterCoarse => "chapter_coarse",
+            Self::FullMultiPass => "full_multi_pass",
+        }
+    }
+
+    /// Ordered pass list for this preset (matches `settings.yaml` window/stride pairs).
+    pub fn passes(self) -> Vec<PassSpec> {
+        match self {
+            Self::ActFine => vec![
+                PassSpec {
+                    name: "act_50_10".into(),
+                    scope: PassScope::Act,
+                    window_size: 50,
+                    stride: 10,
+                },
+                PassSpec {
+                    name: "act_100_25".into(),
+                    scope: PassScope::Act,
+                    window_size: 100,
+                    stride: 25,
+                },
+            ],
+            Self::ChapterCoarse => vec![
+                PassSpec {
+                    name: "chapter_200_50".into(),
+                    scope: PassScope::Chapter,
+                    window_size: 200,
+                    stride: 50,
+                },
+                PassSpec {
+                    name: "chapter_400_100".into(),
+                    scope: PassScope::Chapter,
+                    window_size: 400,
+                    stride: 100,
+                },
+            ],
+            Self::FullMultiPass => default_rf_multi_pass_config().passes,
+        }
+    }
+
+    /// Window/stride applied to the visualization grid (finest pass in the bundle).
+    pub fn display_pass(self) -> (u32, u32) {
+        match self {
+            Self::ActFine | Self::FullMultiPass => (50, 10),
+            Self::ChapterCoarse => (200, 50),
+        }
+    }
+}
+
+/// Per-pass window estimate for RF chapter preset UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RfPassEstimate {
+    pub name: String,
+    pub scope: PassScope,
+    pub window_size: u32,
+    pub stride: u32,
+    pub window_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RfChapterPassEstimate {
+    pub preset: String,
+    pub passes: Vec<RfPassEstimate>,
+    pub total_windows: u32,
+}
+
+pub fn multi_pass_config_for_preset(preset: RfChapterPreset) -> MultiPassConfig {
+    let mut config = default_rf_multi_pass_config();
+    config.passes = preset.passes();
+    config
+}
+
+/// Estimate embedding windows for each pass in an RF chapter preset.
+pub fn estimate_rf_chapter_passes(
+    chapter_text: &str,
+    scope_manifest: &ScopeManifest,
+    preset: RfChapterPreset,
+) -> Result<RfChapterPassEstimate, AppError> {
+    use crate::contract::build_scope_manifest;
+    use crate::importer::paginate_by_token_count;
+    use crate::windowing::generate_windows;
+
+    let config = multi_pass_config_for_preset(preset);
+    let mut pass_estimates = Vec::new();
+    let mut total_windows = 0u32;
+
+    for spec in &config.passes {
+        let window_count = match spec.scope {
+            PassScope::Act => {
+                let mut count = 0u32;
+                for act in &scope_manifest.acts {
+                    let start = act.scope_char_start as usize;
+                    let end = act.scope_char_end as usize;
+                    let Some(act_slice) = chapter_text.get(start..end) else {
+                        continue;
+                    };
+                    let act_text = act_slice.trim();
+                    if act_text.is_empty() {
+                        continue;
+                    }
+                    let act_manifest =
+                        build_scope_manifest(scope_manifest.chapter, act_text, act.doc_char_start);
+                    let pages = crate::importer::paginate_scope(&act_manifest, act_text)?;
+                    count += generate_windows(&pages, spec.window_size, spec.stride).len() as u32;
+                }
+                count
+            }
+            PassScope::Chapter => {
+                let pages = paginate_by_token_count(chapter_text, config.tokens_per_page)?;
+                generate_windows(&pages, spec.window_size, spec.stride).len() as u32
+            }
+        };
+        total_windows += window_count;
+        pass_estimates.push(RfPassEstimate {
+            name: spec.name.clone(),
+            scope: spec.scope,
+            window_size: spec.window_size,
+            stride: spec.stride,
+            window_count,
+        });
+    }
+
+    Ok(RfChapterPassEstimate {
+        preset: preset.as_id().to_string(),
+        passes: pass_estimates,
+        total_windows,
+    })
+}
+
 /// Default 4-pass bundle from Romance Factory `settings.yaml` / integration contract.
 pub fn default_rf_multi_pass_config() -> MultiPassConfig {
     MultiPassConfig {
@@ -499,6 +650,34 @@ mod tests {
             merged < pass_clusters,
             "identical passes should merge overlapping clusters ({merged} vs {pass_clusters})"
         );
+    }
+
+    #[test]
+    fn rf_preset_pass_counts_match_settings_yaml() {
+        let full = RfChapterPreset::FullMultiPass.passes();
+        assert_eq!(full.len(), 4);
+        assert_eq!(full[0].window_size, 50);
+        assert_eq!(full[0].stride, 10);
+        assert_eq!(full[3].window_size, 400);
+        assert_eq!(full[3].stride, 100);
+
+        let act = RfChapterPreset::ActFine.passes();
+        assert_eq!(act.len(), 2);
+        assert!(act.iter().all(|p| p.scope == PassScope::Act));
+
+        let chapter = RfChapterPreset::ChapterCoarse.passes();
+        assert_eq!(chapter.len(), 2);
+        assert!(chapter.iter().all(|p| p.scope == PassScope::Chapter));
+    }
+
+    #[test]
+    fn estimate_rf_chapter_passes_non_empty() {
+        let text = repeated_chapter_text();
+        let manifest = build_scope_manifest(1, &text, 0);
+        let est = estimate_rf_chapter_passes(&text, &manifest, RfChapterPreset::ActFine)
+            .expect("estimate");
+        assert_eq!(est.passes.len(), 2);
+        assert!(est.total_windows > 0);
     }
 
     #[test]

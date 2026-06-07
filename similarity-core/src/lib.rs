@@ -32,8 +32,9 @@ pub use analyze_prose::{
     TextEmbedder,
 };
 pub use multi_pass::{
-    analyze_prose_multi_pass, default_rf_multi_pass_config, MultiPassConfig, MultiPassInput,
-    MultiPassResult, PassScope, PassSpec,
+    analyze_prose_multi_pass, default_rf_multi_pass_config, estimate_rf_chapter_passes,
+    multi_pass_config_for_preset, MultiPassConfig, MultiPassInput, MultiPassResult, PassScope,
+    PassSpec, RfChapterPassEstimate, RfChapterPreset, RfPassEstimate,
 };
 pub use importer::{import_document, paginate_scope, ImportDocumentParams};
 pub use visualization::{
