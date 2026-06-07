@@ -137,7 +137,7 @@
     },
     "SuggestedOp": {
       "type": "string",
-      "enum": ["keep", "rewrite", "remove", "bridge"]
+      "enum": ["delete_span", "rewrite_span", "replace_paragraph"]
     },
     "EditSpanV1": {
       "type": "object",
@@ -209,7 +209,7 @@
     },
     "RepetitionReportV1": {
       "type": "object",
-      "required": ["job_id", "clusters", "stats"],
+      "required": ["job_id", "clusters", "stats", "boundary_version"],
       "additionalProperties": false,
       "properties": {
         "job_id": { "type": "string" },
@@ -217,7 +217,8 @@
           "type": "array",
           "items": { "$ref": "#/$defs/ClusterSummaryV1" }
         },
-        "stats": { "$ref": "#/$defs/AnalysisStats" }
+        "stats": { "$ref": "#/$defs/AnalysisStats" },
+        "boundary_version": { "type": "integer", "const": 1 }
       }
     },
     "AnalysisPassRecord": {

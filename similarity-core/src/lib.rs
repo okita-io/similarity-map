@@ -31,9 +31,8 @@ pub use analyze_prose::{
     TextEmbedder,
 };
 pub use multi_pass::{
-    analyze_prose_multi_pass, cluster_blast_radius_words, default_rf_multi_pass_config,
-    suggested_op_for_merged_cluster, MultiPassConfig, MultiPassInput, MultiPassResult, PassScope,
-    PassSpec,
+    analyze_prose_multi_pass, default_rf_multi_pass_config, MultiPassConfig, MultiPassInput,
+    MultiPassResult, PassScope, PassSpec,
 };
 pub use importer::{import_document, paginate_scope, ImportDocumentParams};
 pub use visualization::{
@@ -50,10 +49,13 @@ pub use contract::{
 };
 pub use report::{
     build_repetition_report, build_repetition_report_from_registry,
-    build_repetition_report_with_manifest, derive_cluster_enrichments, format_segment_id,
+    build_repetition_report_with_manifest, derive_cluster_enrichments,
+    derive_cluster_enrichments_v1, duplicate_blast_radius_words, format_segment_id,
     load_repetition_report_from_storage, pages_to_document_text, resolve_span_location,
     AnalysisScope, AnalysisStats, ClusterSummary, EditSpan, ParagraphSpan, RepetitionReport,
-    ReportAnalysisParams, ScopeManifest, ScopeSegment, SpanLocation, SuggestedOp, SCHEMA_VERSION,
+    ReportAnalysisParams, ScopeManifest, ScopeSegment, SpanLocation, SuggestedOp,
+    BOUNDARY_VERSION, DELETE_SPAN_MAX_WORDS, HIGH_SIMILARITY, PARAGRAPH_WORD_THRESHOLD,
+    SCHEMA_VERSION,
 };
 pub use spans::{
     expand_to_sentence_boundaries, merge_overlapping_spans, sentence_index_at_char_offset,

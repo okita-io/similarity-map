@@ -44,7 +44,7 @@ pub struct ClusterSummaryV1 {
     pub suggested_op: SuggestedOp,
     /// True when duplicate instances span more than one act.
     pub cross_act: bool,
-    /// True when cross-act repetition likely needs a transitional bridge before rewrite.
+    /// True when a mid-act paragraph-sized duplicate needs bridge prose before edit.
     pub needs_bridge: bool,
 }
 
@@ -54,6 +54,13 @@ pub struct RepetitionReportV1 {
     pub job_id: String,
     pub clusters: Vec<ClusterSummaryV1>,
     pub stats: AnalysisStats,
+    /// Sentence-boundary expansion version for RF span expansion parity.
+    #[serde(default = "default_boundary_version")]
+    pub boundary_version: u32,
+}
+
+fn default_boundary_version() -> u32 {
+    crate::report::BOUNDARY_VERSION
 }
 
 /// One analysis pass (act window, chapter window/stride bundle, etc.).
@@ -183,6 +190,7 @@ pub fn repetition_report_to_v1(
         job_id: report.job_id.clone(),
         clusters,
         stats: report.stats.clone(),
+        boundary_version: crate::report::BOUNDARY_VERSION,
     }
 }
 
@@ -263,6 +271,7 @@ pub fn merge_pass_reports(passes: &[AnalysisPassRecord]) -> RepetitionReportV1 {
                 total_duplicate_instances: 0,
                 total_duplicate_words_estimate: 0,
             },
+            boundary_version: crate::report::BOUNDARY_VERSION,
         };
     }
 
@@ -322,6 +331,7 @@ pub fn merge_pass_reports(passes: &[AnalysisPassRecord]) -> RepetitionReportV1 {
             total_duplicate_instances,
             total_duplicate_words_estimate,
         },
+        boundary_version: crate::report::BOUNDARY_VERSION,
     }
 }
 
@@ -397,15 +407,11 @@ fn merge_cluster_summaries(existing: &mut ClusterSummaryV1, incoming: &ClusterSu
 }
 
 fn recompute_cluster_enrichments(cluster: &mut ClusterSummaryV1) {
-    cluster.suggested_op = crate::multi_pass::suggested_op_for_merged_cluster(cluster);
-    let acts: std::collections::HashSet<u32> =
-        cluster.spans.iter().map(|s| s.location.act).collect();
-    cluster.cross_act = acts.len() > 1;
-    cluster.needs_bridge = cluster.cross_act
-        && cluster
-            .spans
-            .iter()
-            .any(|s| s.similarity_to_centroid >= 0.85);
+    let (cross_act, needs_bridge, suggested_op) =
+        crate::report::derive_cluster_enrichments_v1(&cluster.spans);
+    cluster.cross_act = cross_act;
+    cluster.needs_bridge = needs_bridge;
+    cluster.suggested_op = suggested_op;
 }
 
 /// Assemble a full [`AnalysisOutput`] from pass records and chapter text.
@@ -471,6 +477,22 @@ pub fn validate_analysis_output(output: &AnalysisOutput) -> Result<(), ContractE
         return Err(ContractError::Validation(
             "scope_manifest.chapter must match scope.chapter".into(),
         ));
+    }
+    if output.merged_repetition_report.boundary_version != crate::report::BOUNDARY_VERSION {
+        return Err(ContractError::Validation(format!(
+            "merged_repetition_report.boundary_version must be {}, got {}",
+            crate::report::BOUNDARY_VERSION,
+            output.merged_repetition_report.boundary_version
+        )));
+    }
+    for pass in &output.passes {
+        if pass.repetition_report.boundary_version != crate::report::BOUNDARY_VERSION {
+            return Err(ContractError::Validation(format!(
+                "pass {} repetition_report.boundary_version must be {}",
+                pass.pass_id,
+                crate::report::BOUNDARY_VERSION
+            )));
+        }
     }
     for act in &output.scope_manifest.acts {
         for para in &act.paragraphs {
@@ -580,7 +602,7 @@ mod tests {
                 member_window_count: 1,
             }],
             spans: vec![],
-            suggested_op: SuggestedOp::Rewrite,
+            suggested_op: SuggestedOp::RewriteSpan,
             cross_act: false,
             needs_bridge: false,
         };
@@ -609,6 +631,7 @@ mod tests {
                     total_duplicate_instances: 1,
                     total_duplicate_words_estimate: 1,
                 },
+                boundary_version: crate::report::BOUNDARY_VERSION,
             },
         };
 
@@ -627,6 +650,7 @@ mod tests {
                     total_duplicate_instances: 1,
                     total_duplicate_words_estimate: 1,
                 },
+                boundary_version: crate::report::BOUNDARY_VERSION,
             },
         };
 
