@@ -1,15 +1,17 @@
 use std::path::Path;
 
 use similarity_core::build_scope_manifest;
-use similarity_core::contract::{build_analysis_output_with_manifest, validate_analysis_output};
+use similarity_core::contract::validate_analysis_output;
+use similarity_core::{MultiPassConfig, PassScope, PassSpec};
 use similarity_core::report::AnalysisScope;
 use similarity_core::ScopeManifest;
 use similarity_core::embedding::EmbeddingEngine;
 use similarity_core::{
-    analyze_prose, AnalysisInput, AnalyzeProseOptions, AnalyzeProseResult, DeterministicTestEmbedder,
+    analyze_prose, analyze_prose_multi_pass, AnalysisInput, AnalyzeProseOptions,
+    AnalyzeProseResult, DeterministicTestEmbedder, MultiPassInput,
 };
 
-use crate::pass_config::{PassConfigFile, PassEntry, PassScope};
+use crate::pass_config::PassConfigFile;
 use crate::story::ChapterDraft;
 
 pub struct AnalyzeContext {
@@ -39,7 +41,16 @@ pub fn run_analyze(ctx: AnalyzeContext) -> Result<String, String> {
     };
 
     let output = if let Some(ref config) = ctx.pass_config {
-        run_multi_pass(&ctx, &scope, config)?
+        let multi_config: MultiPassConfig = config.clone().into();
+        multi_config.validate().map_err(|e| e.to_string())?;
+        let input = MultiPassInput {
+            text: ctx.text.clone(),
+            scope_manifest: ctx.scope_manifest.clone(),
+            config: multi_config,
+            chapter_scope: scope,
+            job_id: format!("cli-ch{}", ctx.chapter),
+        };
+        run_multi_pass(&input, &ctx)?.output
     } else {
         let params = ctx
             .single_params
@@ -47,7 +58,7 @@ pub fn run_analyze(ctx: AnalyzeContext) -> Result<String, String> {
             .ok_or_else(|| "internal error: single-pass analysis requires params".to_string())?;
         let options = build_options(
             &scope,
-            &PassEntry {
+            &PassSpec {
                 name: format!("chapter-window-{}-{}", params.window_size, params.stride),
                 scope: PassScope::Chapter,
                 window_size: params.window_size,
@@ -68,38 +79,40 @@ pub fn run_analyze(ctx: AnalyzeContext) -> Result<String, String> {
 }
 
 fn run_multi_pass(
+    input: &MultiPassInput,
     ctx: &AnalyzeContext,
-    scope: &AnalysisScope,
-    config: &PassConfigFile,
-) -> Result<similarity_core::AnalysisOutput, String> {
-    config.validate()?;
-    let expand = ctx.expand_to_sentences;
-    let mut pass_records = Vec::with_capacity(config.passes.len());
-
-    for pass in &config.passes {
-        let params = config.to_analysis_params(pass);
-        let mut pass_scope = scope.clone();
-        if pass.scope == PassScope::Act {
-            pass_scope.act = Some(1);
+) -> Result<similarity_core::MultiPassResult, String> {
+    if ctx.test_embedder {
+        let mut embedder = DeterministicTestEmbedder::new(384);
+        analyze_prose_multi_pass(input, &mut embedder).map_err(|e| e.to_string())
+    } else {
+        let model_path = ctx
+            .model_path
+            .clone()
+            .or_else(default_model_path)
+            .ok_or_else(|| {
+                "embedding model not found; set --model-path or SIMILARITY_MAP_MODEL_PATH"
+                    .to_string()
+            })?;
+        if !model_path.is_file() {
+            return Err(format!(
+                "ONNX model not found at {}",
+                model_path.display()
+            ));
         }
-        let options = build_options(&pass_scope, pass, expand);
-        let input = AnalysisInput {
-            text: ctx.text.clone(),
-            scope_manifest: ctx.scope_manifest.clone(),
-            params,
-        };
-        let result = run_one_pass(&input, &options, ctx)?;
-        pass_records.extend(result.output.passes);
+        let mut engine =
+            EmbeddingEngine::new(&model_path).map_err(|e: similarity_core::types::AppError| {
+                e.to_string()
+            })?;
+        analyze_prose_multi_pass(input, &mut engine).map_err(|e| e.to_string())
     }
-
-    Ok(build_analysis_output_with_manifest(
-        scope.clone(),
-        ctx.scope_manifest.clone(),
-        pass_records,
-    ))
 }
 
-fn build_options(scope: &AnalysisScope, pass: &PassEntry, expand_to_sentences: bool) -> AnalyzeProseOptions {
+fn build_options(
+    scope: &AnalysisScope,
+    pass: &PassSpec,
+    expand_to_sentences: bool,
+) -> AnalyzeProseOptions {
     let label = match pass.scope {
         PassScope::Act => format!("Act-scoped phrase pass ({}/{})", pass.window_size, pass.stride),
         PassScope::Chapter => format!(
