@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod analyze_prose;
 pub mod benchmark;
 pub mod cancellation;
 pub mod centroid;
@@ -22,6 +23,12 @@ pub mod windowing;
 pub mod job_data;
 
 pub use analysis::{paginate_text, validate_analysis_params, AnalysisParams, ClusteringArtifacts};
+pub use analyze_prose::{
+    analyze_prose, analyze_prose_with_model, run_analysis_stages,
+    run_analysis_stages_from_pages, run_clustering_stages_from_embeddings, AnalysisArtifacts,
+    AnalysisInput, AnalyzeProseOptions, AnalyzeProseResult, DeterministicTestEmbedder,
+    TextEmbedder,
+};
 pub use importer::{import_document, paginate_scope, ImportDocumentParams};
 pub use visualization::{
     build_text_highlights, build_visualization_payload, doc_char_to_page,
@@ -30,10 +37,10 @@ pub use visualization::{
 };
 
 pub use contract::{
-    build_analysis_output, build_scope_manifest, from_export_json, merge_pass_reports,
-    repetition_report_to_v1, to_export_json, validate_analysis_output, ActSegment,
-    AnalysisOutput, AnalysisPassRecord, ClusterSummaryV1, ContractError, EditSpanV1,
-    ParagraphIndexEntry, RepetitionReportV1,
+    build_analysis_output, build_analysis_output_with_manifest, build_scope_manifest,
+    from_export_json, merge_pass_reports, repetition_report_to_v1, to_export_json,
+    validate_analysis_output, ActSegment, AnalysisOutput, AnalysisPassRecord, ClusterSummaryV1,
+    ContractError, EditSpanV1, ParagraphIndexEntry, RepetitionReportV1,
 };
 pub use report::{
     build_repetition_report, build_repetition_report_from_registry,

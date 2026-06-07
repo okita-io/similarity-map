@@ -427,6 +427,15 @@ pub fn build_analysis_output(
     passes: Vec<AnalysisPassRecord>,
 ) -> AnalysisOutput {
     let scope_manifest = build_scope_manifest(scope.chapter, chapter_text, scope.doc_char_start);
+    build_analysis_output_with_manifest(scope, scope_manifest, passes)
+}
+
+/// Assemble a full [`AnalysisOutput`] using a caller-supplied scope manifest.
+pub fn build_analysis_output_with_manifest(
+    scope: AnalysisScope,
+    scope_manifest: ScopeManifest,
+    passes: Vec<AnalysisPassRecord>,
+) -> AnalysisOutput {
     let merged_repetition_report = merge_pass_reports(&passes);
 
     AnalysisOutput {

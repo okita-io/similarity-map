@@ -100,10 +100,14 @@ No ad-hoc field renaming or nested unwrapping is required — the envelope is co
 
 ```rust
 use similarity_core::{
-    build_analysis_output, from_export_json, merge_pass_reports,
-    repetition_report_to_v1, AnalysisOutput, SCHEMA_VERSION,
+    analyze_prose, analyze_prose_with_model, build_analysis_output,
+    build_analysis_output_with_manifest, from_export_json, merge_pass_reports,
+    repetition_report_to_v1, AnalysisInput, AnalyzeProseOptions, AnalysisOutput,
+    DeterministicTestEmbedder, SCHEMA_VERSION, TextEmbedder,
 };
 ```
+
+Headless entry point (no Tauri / LanceDB): `analyze_prose(input, options, embedder)` runs paginate → window → embed → cluster → report in memory and returns contract v1 `AnalysisOutput`. Use `DeterministicTestEmbedder` in unit tests without ONNX.
 
 ## Related tasks
 

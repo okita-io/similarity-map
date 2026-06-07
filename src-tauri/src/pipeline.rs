@@ -13,17 +13,19 @@ use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
 use similarity_core::cancellation::{self};
-use similarity_core::centroid::{build_cluster_registry, WindowData};
 use similarity_core::clustering::{
     derive_min_cluster_size, validate_clustering_params,
 };
 use similarity_core::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
+use similarity_core::report::pages_to_document_text;
+use similarity_core::build_scope_manifest;
+use similarity_core::run_clustering_stages_from_embeddings;
 use crate::events;
 use similarity_core::hash::{compute_document_hash, compute_settings_hash};
 use similarity_core::model;
 use crate::rasterizer::{encode_canvas_base64, rasterize_page};
 use similarity_core::storage::{InsertJobParams, PageRecord, Storage, WindowRecord};
-use similarity_core::subcell::{build_page_sub_grids, compute_sub_cell, WindowSubCellData};
+use similarity_core::subcell::compute_sub_cell;
 use similarity_core::types::*;
 use similarity_core::windowing::generate_windows;
 
@@ -187,19 +189,6 @@ async fn persist_clustered_windows(
     }
 
     Ok(())
-}
-
-/// Run clustering (HDBSCAN + KMeans, or KMeans-only) and optional subphrase merging.
-fn run_clustering(
-    config: &PipelineConfig,
-    all_embeddings: &[Vec<f32>],
-    windows: &[Window],
-) -> Result<(Vec<i32>, Vec<i32>), AppError> {
-    similarity_core::analysis::run_clustering(
-        &pipeline_config_to_analysis_params(config),
-        all_embeddings,
-        windows,
-    )
 }
 
 fn pipeline_config_to_analysis_params(config: &PipelineConfig) -> similarity_core::AnalysisParams {
@@ -605,11 +594,21 @@ pub async fn run_pipeline(
         );
     }
 
-    let (hdbscan_labels, stable_labels) =
-        run_clustering(&config, &all_embeddings, &windows)?;
+    let document_text = pages_to_document_text(&pages);
+    let scope_manifest = build_scope_manifest(1, &document_text, 0);
+    let analysis_params = pipeline_config_to_analysis_params(&config);
+    let artifacts = run_clustering_stages_from_embeddings(
+        &document_text,
+        &pages,
+        &windows,
+        &all_embeddings,
+        &analysis_params,
+        &scope_manifest,
+        &job_id,
+        true,
+    )?;
     crate::log_info!(app_handle, "pipeline", "clustering complete");
 
-    // ─── Stage 8: Compute Centroids and Build Cluster Registry ───────────────
     emit_stage_progress(
         &app_handle,
         &job_id,
@@ -620,34 +619,10 @@ pub async fn run_pipeline(
         0.0,
     );
 
-    let window_data: Vec<WindowData> = windows
-        .iter()
-        .enumerate()
-        .map(|(i, w)| WindowData {
-            window_id: w.window_id.clone(),
-            window_index: w.window_index,
-            page: w.page,
-            cluster_id: stable_labels[i],
-            embedding: all_embeddings[i].clone(),
-            text: w.text.clone(),
-            doc_char_start: w.doc_char_start,
-            doc_char_end: w.doc_char_start + w.char_end.saturating_sub(w.char_start),
-        })
-        .collect();
+    let page_sub_grids = artifacts.page_sub_grids;
+    let hdbscan_labels = artifacts.hdbscan_labels;
+    let sim_to_centroids = artifacts.sim_to_centroids;
 
-    let cluster_registry = build_cluster_registry(&window_data);
-
-    // Compute sim_to_centroid for each window
-    let mut sim_to_centroids: Vec<f32> = vec![0.0; windows.len()];
-    for (i, wd) in window_data.iter().enumerate() {
-        if wd.cluster_id >= 0 {
-            if let Some(info) = cluster_registry.clusters.get(&wd.cluster_id) {
-                sim_to_centroids[i] = cosine_similarity(&wd.embedding, &info.centroid);
-            }
-        }
-    }
-
-    // ─── Stage 9: Map Windows to Sub-Cells ───────────────────────────────────
     emit_stage_progress(
         &app_handle,
         &job_id,
@@ -658,23 +633,9 @@ pub async fn run_pipeline(
         0.0,
     );
 
-    // Build page char counts map
     let page_char_counts: HashMap<u32, u32> = pages
         .iter()
         .map(|p| (p.page_num, p.char_count))
-        .collect();
-
-    let subcell_data: Vec<WindowSubCellData> = windows
-        .iter()
-        .enumerate()
-        .map(|(i, w)| WindowSubCellData {
-            window_id: w.window_id.clone(),
-            page: w.page,
-            char_start: w.char_start,
-            char_end: w.char_end,
-            cluster_id: stable_labels[i],
-            sim_to_centroid: sim_to_centroids[i],
-        })
         .collect();
 
     persist_clustered_windows(
@@ -683,13 +644,11 @@ pub async fn run_pipeline(
         &windows,
         &all_embeddings,
         &hdbscan_labels,
-        &stable_labels,
+        &artifacts.stable_labels,
         &sim_to_centroids,
         &page_char_counts,
     )
     .await?;
-
-    let page_sub_grids = build_page_sub_grids(&subcell_data, &page_char_counts);
 
     // ─── Stage 10: Rasterize Pages ───────────────────────────────────────────
     emit_stage_progress(
@@ -1014,8 +973,19 @@ pub async fn resume_pipeline(
         0.0,
     );
 
-    let (hdbscan_labels, stable_labels) =
-        run_clustering(&config, &all_embeddings, &windows)?;
+    let document_text = pages_to_document_text(&pages);
+    let scope_manifest = build_scope_manifest(1, &document_text, 0);
+    let analysis_params = pipeline_config_to_analysis_params(&config);
+    let artifacts = run_clustering_stages_from_embeddings(
+        &document_text,
+        &pages,
+        &windows,
+        &all_embeddings,
+        &analysis_params,
+        &scope_manifest,
+        &job_id,
+        true,
+    )?;
 
     // Centroid computation
     emit_stage_progress(
@@ -1028,32 +998,9 @@ pub async fn resume_pipeline(
         0.0,
     );
 
-    let window_data: Vec<WindowData> = windows
-        .iter()
-        .enumerate()
-        .map(|(i, w)| WindowData {
-            window_id: w.window_id.clone(),
-            window_index: w.window_index,
-            page: w.page,
-            cluster_id: stable_labels[i],
-            embedding: all_embeddings[i].clone(),
-            text: w.text.clone(),
-            doc_char_start: w.doc_char_start,
-            doc_char_end: w.doc_char_start + w.char_end.saturating_sub(w.char_start),
-        })
-        .collect();
-
-    let cluster_registry = build_cluster_registry(&window_data);
-
-    // Compute sim_to_centroid for each window
-    let mut sim_to_centroids: Vec<f32> = vec![0.0; windows.len()];
-    for (i, wd) in window_data.iter().enumerate() {
-        if wd.cluster_id >= 0 {
-            if let Some(info) = cluster_registry.clusters.get(&wd.cluster_id) {
-                sim_to_centroids[i] = cosine_similarity(&wd.embedding, &info.centroid);
-            }
-        }
-    }
+    let page_sub_grids = artifacts.page_sub_grids;
+    let hdbscan_labels = artifacts.hdbscan_labels;
+    let sim_to_centroids = artifacts.sim_to_centroids;
 
     // Sub-cell mapping
     emit_stage_progress(
@@ -1071,32 +1018,17 @@ pub async fn resume_pipeline(
         .map(|p| (p.page_num, p.char_count))
         .collect();
 
-    let subcell_data: Vec<WindowSubCellData> = windows
-        .iter()
-        .enumerate()
-        .map(|(i, w)| WindowSubCellData {
-            window_id: w.window_id.clone(),
-            page: w.page,
-            char_start: w.char_start,
-            char_end: w.char_end,
-            cluster_id: stable_labels[i],
-            sim_to_centroid: sim_to_centroids[i],
-        })
-        .collect();
-
     persist_clustered_windows(
         &store,
         &job_id,
         &windows,
         &all_embeddings,
         &hdbscan_labels,
-        &stable_labels,
+        &artifacts.stable_labels,
         &sim_to_centroids,
         &page_char_counts,
     )
     .await?;
-
-    let page_sub_grids = build_page_sub_grids(&subcell_data, &page_char_counts);
 
     // Rasterization
     emit_stage_progress(
