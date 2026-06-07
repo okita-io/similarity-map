@@ -303,6 +303,94 @@ maturin develop
 pytest tests/test_analyze_prose.py -v
 ```
 
+### Headless pipeline & ONNX Runtime
+
+Headless runs (CLI, PyO3 in Romance Factory, CI) need the **ONNX Runtime native shared library** in addition to the downloaded `.onnx` embedding model. The Rust `ort` crate uses **dynamic loading** (`load-dynamic`); the dylib must exist before any session API runs.
+
+**Version requirement:** `similarity-core` depends on `ort` 2.0.0-rc.12, which targets **ONNX Runtime 1.24.x**. Do not use 1.20.x or other mismatched builds — embedding often stalls at 0% with no useful error.
+
+#### Install paths (probed automatically)
+
+`similarity-core/src/ort_runtime.rs` searches in order:
+
+1. **`ORT_DYLIB_PATH`** — full path to the shared library (always preferred in CI and non-standard installs)
+2. Platform defaults (only if `ORT_DYLIB_PATH` is unset):
+
+| OS | Default probe paths |
+|---|---|
+| **macOS** | `/opt/homebrew/lib/libonnxruntime.dylib`, `/usr/local/lib/libonnxruntime.dylib` |
+| **Linux** | `/usr/lib/x86_64-linux-gnu/libonnxruntime.so`, `/usr/lib/aarch64-linux-gnu/libonnxruntime.so`, `/usr/local/lib/libonnxruntime.so`, `/usr/lib/libonnxruntime.so` |
+
+#### macOS install
+
+```bash
+brew install onnxruntime
+export ORT_DYLIB_PATH="$(brew --prefix onnxruntime)/lib/libonnxruntime.dylib"
+```
+
+Apple Silicon Homebrew also installs under `/opt/homebrew/lib/` (included in auto-probe).
+
+#### Linux install
+
+**Option A — GitHub release (recommended for CI and pinned version):**
+
+```bash
+ORT_VERSION=1.24.2
+curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
+  | tar xz -C /tmp
+sudo cp /tmp/onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so* /usr/local/lib/
+export ORT_DYLIB_PATH=/usr/local/lib/libonnxruntime.so
+```
+
+Use `onnxruntime-linux-aarch64-${ORT_VERSION}.tgz` on arm64.
+
+**Option B — distro package** (verify version ≥ 1.24 before relying on it):
+
+```bash
+# Debian/Ubuntu — package version varies; prefer Option A if embedding hangs
+sudo apt install libonnxruntime libonnxruntime-dev
+export ORT_DYLIB_PATH=/usr/lib/x86_64-linux-gnu/libonnxruntime.so
+```
+
+Romance Factory provides `./scripts/ci_install_onnxruntime.sh` (repo root) for macOS Homebrew or Linux x64/aarch64 release install.
+
+#### Embedding model (`.onnx` file)
+
+Separate from ONNX Runtime — this is the MiniLM weights file (~23 MB quantized):
+
+| Env var | Effect |
+|---|---|
+| `SIMILARITY_MAP_MODEL_PATH` | Full path to `all-MiniLM-L6-v2.onnx` |
+| `SIMILARITY_MAP_MODEL_DIR` | Directory containing the model (or `models/` subdir) |
+| `SIMILARITY_MAP_DATA_DIR` | App-data root (desktop default: `~/Library/Application Support` on macOS, `~/.local/share` on Linux) |
+
+**CI / headless download example:**
+
+```bash
+export SIMILARITY_MAP_MODEL_DIR="$HOME/.cache/similarity-map/models"
+mkdir -p "$SIMILARITY_MAP_MODEL_DIR"
+curl -fsSL \
+  "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quint8_avx2.onnx" \
+  -o "$SIMILARITY_MAP_MODEL_DIR/all-MiniLM-L6-v2.onnx"
+```
+
+Use `model_qint8_arm64.onnx` on Apple Silicon if you download manually from Hugging Face.
+
+#### Romance Factory CI
+
+Optional workflow: romance-factory [`.github/workflows/similarity-map-ci.yml`](../.github/workflows/similarity-map-ci.yml). Enable weekly runs by setting repository variable **`SIMILARITY_MAP_CI=1`**, or trigger manually from Actions. See [`docs/design/similarity-map-onnx-ci.md`](../docs/design/similarity-map-onnx-ci.md).
+
+#### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `ONNX Runtime shared library (…) not found` | Dylib missing | Install 1.24.x; set `ORT_DYLIB_PATH` |
+| Progress stuck at 0% during embed | ORT **version mismatch** | Use ONNX Runtime 1.24.x, not 1.20.x |
+| `Failed to load ONNX Runtime from …` | Wrong arch or corrupt dylib | Reinstall; confirm `file "$ORT_DYLIB_PATH"` matches your CPU |
+| `ONNX model not found at …` | Model not cached | Set `SIMILARITY_MAP_MODEL_DIR` or download `.onnx` (see above) |
+| PyO3 `import similarity_core` fails | Extension not built | From romance-factory root: `./scripts/build_similarity_core.sh` |
+| `test_embedder=True` works, production fails | Missing ORT or model | Expected — offline tests skip native deps |
+
 
 ## License
 
