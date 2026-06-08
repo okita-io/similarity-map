@@ -118,7 +118,51 @@ Headless entry point (no Tauri / LanceDB): `analyze_prose(input, options, embedd
 
 Multi-pass orchestration: `analyze_prose_multi_pass(MultiPassInput, embedder)` runs the default RF 4-pass bundle (`default_rf_multi_pass_config()`) — act-scoped passes per act, chapter-scoped passes on the full chapter — then merges via `merge_pass_reports`.
 
+## UI YAML round-trip (THE-344)
+
+The Similarity Map app exports a paste-ready `generate:similarity_map:` block
+(`similarity-map/src/settings-yaml-export.js`). Romance Factory loads it from
+repo-root `settings.yaml` without field renaming.
+
+### Export shape
+
+```yaml
+generate:
+  similarity_map:
+    enabled: true
+    expand_to_sentences: true
+    pre_editorial_dedupe: true
+    inject_editorial_issues: true
+    min_repetitions: 3
+    min_samples: 3
+    enable_hdbscan: true
+    link_subphrases: false
+    passes:
+      - name: act_50_10
+        scope: act
+        window_size: 50
+        stride: 10
+      # … additional passes …
+```
+
+RF preset **full multi-pass** matches `default_similarity_map_passes()` in
+`romance_factory.generate.similarity_map_config`.
+
+### RF consumption path
+
+1. `parse_similarity_map_config(yaml_block)` → `SimilarityMapConfig`
+2. `pass_config_from_similarity_map(config)` → PyO3 `analyze_prose_multi_pass` JSON params
+3. `analyze_chapter(story_path, chapter, config)` → v1 `AnalysisOutput`
+4. `report_to_patch_ops(merged_report)` → surgical `delete_span` pre-editorial dedupe
+
+Round-trip acceptance: same `pass_config` and `dedupe_outcome_fingerprint`
+whether params are parsed from UI YAML or set in Python directly. Offline
+fixtures: `romance-factory/tests/fixtures/repetition/ui_export/`. Full procedure:
+`romance-factory/docs/design/similarity-map-yaml-roundtrip.md`.
+
 ## Related tasks
 
 - **THE-315** — Define RepetitionReport v1 JSON contract (this document)
+- **THE-326** — Similarity Map UI → settings.yaml export
+- **THE-344** — UI YAML → pipeline round-trip validation
 - Downstream: PyO3 export, RF `settings.yaml` multi-pass bundles, surgical editor hooks
