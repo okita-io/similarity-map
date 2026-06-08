@@ -88,6 +88,23 @@ body {
   margin: 0;
 }
 
+.text-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.text-preview-export-status {
+  min-height: 1.2em;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.text-preview-export-status[data-kind="error"] {
+  color: #ffb4b4;
+}
+
 .text-preview-body {
   flex: 1;
   overflow: auto;

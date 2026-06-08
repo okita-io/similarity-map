@@ -1270,3 +1270,22 @@ pub async fn set_active_document_result(
     save_catalog(&app_data_dir, &catalog)?;
     Ok(to_list(&catalog))
 }
+
+/// Validate v1 [`AnalysisOutput`] and return pretty JSON for RF pipeline consumption.
+#[tauri::command]
+pub fn serialize_analysis_output(
+    output: similarity_core::AnalysisOutput,
+) -> Result<String, AppError> {
+    similarity_core::validate_analysis_output(&output).map_err(|e| {
+        AppError::Validation(similarity_core::types::ValidationError {
+            field: "analysis_output".into(),
+            message: e.to_string(),
+        })
+    })?;
+    similarity_core::to_export_json(&output).map_err(|e| {
+        AppError::Validation(similarity_core::types::ValidationError {
+            field: "analysis_output".into(),
+            message: format!("JSON serialization failed: {e}"),
+        })
+    })
+}

@@ -1,5 +1,9 @@
 // Text preview with cluster span highlighting for tuning against RF output.
 
+import {
+  exportAnalysisOutputJson,
+} from "./export-analysis-output.js";
+
 /**
  * @typedef {Object} SpanLocation
  * @property {number} chapter
@@ -50,8 +54,17 @@ export class TextPreviewPanel {
             <button type="button" id="btn-export-json" class="btn-secondary" title="Export visualization JSON">
               Export JSON
             </button>
+            <button
+              type="button"
+              id="btn-export-report-json"
+              class="btn-secondary"
+              title="Export pipeline AnalysisOutput JSON for Romance Factory"
+            >
+              Export report JSON
+            </button>
           </div>
         </div>
+        <p class="text-preview-export-status" id="text-preview-export-status" role="status" aria-live="polite"></p>
         <p class="text-preview-hint setting-note">
           Highlighted spans from the core analysis. Canonical = first occurrence; duplicates = edit targets.
         </p>
@@ -65,7 +78,10 @@ export class TextPreviewPanel {
 
     this._body = this.container.querySelector("#text-preview-body");
     this._exportBtn = this.container.querySelector("#btn-export-json");
+    this._exportReportBtn = this.container.querySelector("#btn-export-report-json");
+    this._exportStatus = this.container.querySelector("#text-preview-export-status");
     this._exportBtn.addEventListener("click", () => this._exportJson());
+    this._exportReportBtn.addEventListener("click", () => this._exportReportJson());
     this.clear();
   }
 
@@ -116,7 +132,29 @@ export class TextPreviewPanel {
     this._highlights = [];
     this._activeClusterId = null;
     this._scopeManifest = null;
+    this._setExportStatus("");
     this._body.textContent = "Run analysis to preview highlighted spans.";
+  }
+
+  /** @param {string} message @param {"info"|"error"} [kind] */
+  _setExportStatus(message, kind = "info") {
+    if (!this._exportStatus) return;
+    this._exportStatus.textContent = message;
+    this._exportStatus.dataset.kind = kind;
+  }
+
+  /** @param {unknown} err @returns {string} */
+  _formatError(err) {
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object") {
+      const o = /** @type {Record<string, unknown>} */ (err);
+      if (typeof o.message === "string") return o.message;
+      const detail = o.detail;
+      if (detail && typeof detail === "object" && typeof detail.message === "string") {
+        return detail.message;
+      }
+    }
+    return "Export failed";
   }
 
   _hueToCSS(hue) {
@@ -246,6 +284,47 @@ export class TextPreviewPanel {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export JSON failed:", err);
+      this._setExportStatus(this._formatError(err), "error");
+    }
+  }
+
+  async _exportReportJson() {
+    const output =
+      window.currentAnalysisOutput ||
+      window.currentVisualizationPayload?.analysis_output ||
+      this._payload?.analysis_output;
+
+    if (!output) {
+      this._setExportStatus(
+        "No pipeline report available — run analysis first.",
+        "error",
+      );
+      return;
+    }
+
+    const panel = window.importSettingsPanel;
+    const storyPath = panel?.rfStoryPath || null;
+    const chapter = panel?.rfChapter ?? null;
+
+    try {
+      this._exportReportBtn.disabled = true;
+      this._setExportStatus("Validating report…");
+
+      const { savedPath, filename } = await exportAnalysisOutputJson(output, {
+        storyPath,
+        chapter,
+      });
+
+      if (savedPath) {
+        this._setExportStatus(`Saved ${savedPath}`);
+      } else {
+        this._setExportStatus(`Downloaded ${filename}`);
+      }
+    } catch (err) {
+      console.error("Export report JSON failed:", err);
+      this._setExportStatus(this._formatError(err), "error");
+    } finally {
+      this._exportReportBtn.disabled = false;
     }
   }
 }
@@ -257,6 +336,7 @@ export async function applyVisualizationPayload(payload) {
   window.currentJobId = payload.job_id;
   window.currentVisualizationPayload = payload;
   window.currentScopeManifest = payload.scope_manifest || null;
+  window.currentAnalysisOutput = payload.analysis_output || null;
 
   const grid = window.gridRenderer;
   const pageCount = payload.pages?.length || payload.page_rasters?.length || 0;

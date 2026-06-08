@@ -352,7 +352,7 @@ pub fn analyze_prose(
             options.gamma,
             options.expand_to_sentences,
             Some(input.scope_manifest.clone()),
-            None,
+            Some(output.clone()),
         ))
     } else {
         None
@@ -453,6 +453,12 @@ mod tests {
         let viz = result.visualization.expect("visualization requested");
         assert!(!viz.page_rasters.is_empty());
         assert_eq!(viz.job_id, result.output.merged_repetition_report.job_id);
+        let exported = viz
+            .analysis_output
+            .as_ref()
+            .expect("visualization includes pipeline AnalysisOutput");
+        assert_eq!(exported.schema_version, result.output.schema_version);
+        crate::validate_analysis_output(exported).expect("embedded output validates");
     }
 
     #[test]
