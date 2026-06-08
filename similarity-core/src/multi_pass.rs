@@ -567,7 +567,10 @@ fn empty_pass_report(job_id: &str) -> crate::contract::RepetitionReportV1 {
 
 fn is_benign_no_repetition_error(err: &AppError) -> bool {
     match err {
-        AppError::Clustering(e) => e.message.contains("No clusters found"),
+        AppError::Clustering(e) => {
+            e.message.contains("No clusters found")
+                || e.message.contains("Too few windows")
+        }
         AppError::Import(e) => e.message.contains("no analyzable windows"),
         _ => false,
     }

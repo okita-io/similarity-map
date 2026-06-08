@@ -68,6 +68,16 @@ pub fn run_hdbscan(
         }));
     }
 
+    // hdbscan panics when n_points <= min_samples; treat as no repetition signal.
+    let n = embeddings.len();
+    if n <= min_samples as usize {
+        return Err(AppError::Clustering(ClusteringError {
+            message: format!(
+                "Too few windows ({n}) for min_samples ({min_samples})"
+            ),
+        }));
+    }
+
     // Build hyper parameters
     let config = HdbscanHyperParams::builder()
         .min_cluster_size(min_cluster_size as usize)
@@ -623,12 +633,25 @@ mod tests {
     }
 
     #[test]
+    fn test_run_hdbscan_too_few_windows_for_min_samples() {
+        let embeddings = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let result = run_hdbscan(&embeddings, 3, 3);
+        assert!(result.is_err());
+        match result {
+            Err(AppError::Clustering(e)) => {
+                assert!(e.message.contains("Too few windows"));
+            }
+            other => panic!("expected Clustering error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_run_hdbscan_all_noise_returns_error() {
-        // Only 3 points with high min_cluster_size = 10 should result in all noise
+        // Four points with min_cluster_size = 10 should result in all noise (past min_samples guard).
         let dim = 384;
         let mut embeddings: Vec<Vec<f32>> = Vec::new();
 
-        for i in 0..3 {
+        for i in 0..4 {
             let mut v = vec![0.0f32; dim];
             v[i % dim] = 1.0;
             embeddings.push(v);
