@@ -2,9 +2,24 @@
 
 **Project:** Romance Factory  
 **Component:** Manuscript Repetition Visualizer  
-**Status:** Draft  
+**Status:** Historical design baseline (partially implemented)
+**Last implementation review:** 2026-07-14 (`b097f7d`)
 
 ---
+
+> This document records the original desktop design intent. It is not the source of
+> truth for current crate boundaries, IPC, pipeline contracts, or feature completion.
+> See [`CURRENT-STATE.md`](./CURRENT-STATE.md) for verified behavior,
+> [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the four-crate implementation, and
+> [the integration contract](./.kiro/specs/similarity-map/integration-contract.md) for
+> `AnalysisOutput` v1.
+>
+> Important divergences include a responsive wrapping grid rather than fixed ten
+> columns, backend re-rasterization for tolerance, unwired custom tooltips/dithering,
+> an unimplemented `get_page_detail`, and a headless core/CLI/PyO3 architecture added
+> after this specification. References below to Python FFI clustering,
+> `check_partial_job`, `get_page_canvases`, benchmark-on-launch, and a monolithic
+> `src-tauri` backend are historical.
 
 ## 1. Overview
 
@@ -349,6 +364,10 @@ This creates a **heatmap within a heatmap within a heatmap**: the macro-grid sho
 ---
 
 ## 7. UI — Grid Visualization
+
+> **Historical target:** The running UI wraps 120 px cells to viewport width, always
+> uses pixelated rendering, re-rasterizes tolerance through IPC, and does not mount the
+> tooltip/dither modules. Direct grid detail is blocked by `get_page_detail`.
 
 ### 7.1 Layout
 
@@ -734,6 +753,10 @@ struct ClusterInfo {
 ---
 
 ## 9. Architecture
+
+> **Superseded:** See `ARCHITECTURE.md` and `src-tauri/src/lib.rs`. The current
+> workspace has `similarity-core`, `similarity-cli`, `similarity-core-py`, and
+> `src-tauri`; the command list below is the original MVP surface.
 
 ### Tech Stack
 

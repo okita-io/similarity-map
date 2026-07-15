@@ -1,15 +1,33 @@
-# Requirements Document
+# Requirements Document — Baseline and Current Additions
+
+**Status:** Original desktop requirements plus post-MVP integration requirements
+**Last implementation review:** 2026-07-14 (`b097f7d`)
+
+> Requirements 1–30 preserve the original product intent; a checked-in requirement is
+> not proof that the behavior is implemented. Current deviations and verification
+> results are tracked in [`CURRENT-STATE.md`](../../../CURRENT-STATE.md). The current
+> crate/adaptor design is documented in
+> [`ARCHITECTURE.md`](../../../ARCHITECTURE.md), and `AnalysisOutput` v1 is defined by
+> [`integration-contract.md`](./integration-contract.md).
 
 ## Introduction
 
-The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS frontend) that detects and visualizes exact and fuzzy phrase repetition within a long-form manuscript. It renders a portrait-oriented page grid (10 columns × up to 30 rows) where each cell is a 20×20 pixel canvas encoding a sub-grid of repetition clusters. The tool gives authors and editors a single-glance "repetition fingerprint" of an entire book with the ability to drill into any page to see what is repeated, how closely, and where on the page.
+The Similarity Map is a reusable Rust analysis engine with Tauri, CLI, and PyO3
+adapters. The desktop renders a responsive, wrapping page grid where each page is
+derived from a 20×20 raster. It also emits a versioned editorial contract for Romance
+Factory. Direct grid drill-down and some interactions described below remain target
+behavior rather than current behavior.
+
+The current ONNX path does not yet satisfy semantic-tokenization intent in Requirement
+5: it uses hash-derived pseudo token ids rather than MiniLM WordPiece. Treat
+paraphrase-level acceptance criteria as blocked until reference-vector tests pass.
 
 ## Glossary
 
 - **Similarity_Map**: The overall application and its visual output — an interactive grid visualization of manuscript repetition
 - **Page_Cell**: A single 20×20 pixel canvas in the macro-grid representing one page of the document
 - **Sub_Cell**: One pixel within a Page_Cell representing approximately 0.25% of a page's text in reading order
-- **Macro_Grid**: The 10-column × up to 30-row arrangement of Page_Cells
+- **Macro_Grid**: The responsive, wrapping arrangement of Page_Cells (the original fixed ten-column layout is deferred)
 - **Window**: The atomic unit of comparison — an overlapping text segment of configurable token length carrying character offsets
 - **Cluster**: A group of Windows with mutual high cosine similarity, representing a recurring phrase, motif, or structural pattern
 - **Cluster_Registry**: An in-memory data structure mapping cluster IDs to hue, centroid vector, most central window, member count, and page list
@@ -26,8 +44,11 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 - **Job**: A single analysis run (complete or partial) recorded in LanceDB with a unique job_id
 - **Tolerance**: A similarity threshold (0.75–1.00) controlling which sub-cells are visible
 - **Gamma**: A contrast exponent (0.5–3.0) applied to the value channel of the HSV color encoding
-- **Stride**: The number of words the sliding window advances between consecutive Windows
-- **Benchmark_Sample**: A fixed 128-window probe embedded at first launch to measure throughput for time estimates
+- **Stride**: The number of whitespace tokens the sliding window advances between consecutive Windows
+- **Benchmark_Sample**: A fixed probe supported by the core benchmark module; the desktop currently reads a cache but does not automatically create it on first launch
+- **AnalysisOutput**: Versioned JSON envelope shared by the core, UI export, CLI, PyO3 bindings, and Romance Factory
+- **Scope_Manifest**: Stable chapter/act/paragraph index used to locate report spans structurally
+- **Analysis_Adapter**: A consumer of `similarity-core` such as Tauri, the CLI, or PyO3
 
 ## Requirements
 
@@ -97,6 +118,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 7. IF embedding fails for one or more Windows in a batch, THEN THE Embedding_Engine SHALL skip the failed Windows, log the window_index of each failure, and continue processing the remaining batches
 
 ### Requirement 6: Benchmark and Time Estimation
+
+**Implementation status:** Partially implemented. Window estimates work, but the
+desktop only reads an existing benchmark cache; it does not run the first-launch probe.
 
 **User Story:** As an author, I want to see estimated processing time before committing to analysis so that I can tune settings to fit my time budget.
 
@@ -174,6 +198,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 
 ### Requirement 12: Sub-Cell Color Blending
 
+**Implementation status:** Backend weighted blending is implemented. The high-zoom
+frontend dithering criterion is deferred because `dither.js` is not mounted.
+
 **User Story:** As an author, I want overlapping clusters in the same sub-cell to blend visually so that I can perceive multi-cluster overlap without losing the dominant signal.
 
 #### Acceptance Criteria
@@ -196,6 +223,10 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 4. WHEN a page canvas is ready, THE Canvas_Rasterizer SHALL emit a `similarity-map:page-ready` Tauri event containing the job_id, 1-based page number, and the canvas pixel data as a base64-encoded RGBA string
 
 ### Requirement 14: Grid Rendering and Layout
+
+**Implementation status:** The 20×20 rasters and progressive rendering are implemented.
+The running UI uses responsive flex wrapping and always-pixelated rendering rather than
+the fixed ten-column and automatic high-zoom modes below.
 
 **User Story:** As an author, I want the macro-grid to mirror the shape of a real book so that I can intuitively locate pages and see the overall repetition pattern.
 
@@ -222,6 +253,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 6. IF the Chapter Break regex is syntactically invalid, THEN THE Import_Settings_Panel SHALL display an inline error below the regex field and disable the Analyze button until corrected
 
 ### Requirement 16: Display Settings — Tolerance
+
+**Implementation status:** The control is implemented, but tolerance commits call
+backend `raster_pages`; the frontend-only `ToleranceMask` path is not mounted.
 
 **User Story:** As an author, I want to adjust a similarity threshold in real time so that I can filter out weaker echoes and focus on strong repetition.
 
@@ -318,6 +352,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 
 ### Requirement 24: Interactive Tooltips
 
+**Implementation status:** Deferred. `tooltip.js` exists but is not imported or
+instantiated by `main.js`.
+
 **User Story:** As an author, I want to hover over the grid and see contextual information so that I can quickly identify what repetition exists at any point.
 
 #### Acceptance Criteria
@@ -328,6 +365,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 4. WHEN the grid is at base scale where each sub-cell is 1 pixel, THE Grid_Renderer SHALL display only the macro-cell tooltip and SHALL switch to sub-cell tooltips when the cell is rendered at 5×5 pixels per sub-cell or larger
 
 ### Requirement 25: Detail Panel
+
+**Implementation status:** Partial. Text-preview cluster inspection works, but direct
+grid lookup is blocked by the unimplemented `get_page_detail` command.
 
 **User Story:** As an author, I want to click on a page or sub-cell to see the full list of matching windows so that I can read the repeated text and navigate to counterpart pages.
 
@@ -376,6 +416,9 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 
 ### Requirement 29: Performance — Targeted Re-Rasterization
 
+**Implementation status:** Cluster filtering is targeted and gamma is full-page
+re-rasterization. The frontend-only tolerance latency criterion is deferred.
+
 **User Story:** As an author, I want display setting changes to respond quickly so that exploring the visualization feels interactive.
 
 #### Acceptance Criteria
@@ -394,3 +437,53 @@ The Similarity Map is a Tauri 2 desktop application (Rust backend + Vanilla JS f
 1. WHEN a page's clustering and rasterization completes during analysis, THE Similarity_Map SHALL emit a page-ready event with the page number and canvas RGBA data
 2. WHEN a page-ready event is received, THE Grid_Renderer SHALL draw the page canvas into the corresponding grid position (left-to-right, top-to-bottom by page number) within 100 milliseconds of event receipt, regardless of the order in which pages complete
 3. WHILE analysis is in progress, THE Grid_Renderer SHALL display unprocessed page positions as transparent cells matching the grid background color, with the same dimensions and gap spacing as rendered Page_Cells
+
+### Requirement 31: Portable Core API
+
+**User Story:** As an integrator, I want repetition analysis independent of Tauri and
+LanceDB so that it can run in pipelines, tests, and other applications.
+
+#### Acceptance Criteria
+
+1. THE `similarity-core` crate SHALL expose in-memory single-pass and multi-pass entry points without depending on Tauri, Python, or CLI crates
+2. THE caller SHALL be able to supply a production ONNX embedder or deterministic test embedder through a common interface
+3. IF any expected window embedding is missing, THEN the headless core SHALL fail rather than cluster incomplete vectors
+4. THE optional visualization output SHALL remain separate from the pipeline-facing contract
+
+### Requirement 32: AnalysisOutput v1 Contract
+
+**User Story:** As the Romance Factory pipeline, I want a stable, validated output
+shape so that editorial processing does not depend on UI or storage internals.
+
+#### Acceptance Criteria
+
+1. THE core SHALL emit `AnalysisOutput` with `schema_version`, scope, scope manifest, pass records, and merged repetition report
+2. THE repository SHALL maintain matching Rust serde types, a JSON Schema, and an example fixture
+3. THE merged report SHALL include structural `SpanLocation`, deterministic cluster ids, and editorial enrichments
+4. THE CLI and PyO3 adapters SHALL return the same contract shape
+5. THE export path SHALL reject unsupported schema versions or structurally invalid output
+
+### Requirement 33: Headless Adapters
+
+**User Story:** As an automation author, I want process and Python interfaces so that
+Similarity Map can be integrated without launching a desktop WebView.
+
+#### Acceptance Criteria
+
+1. THE CLI SHALL accept JSON input or a Romance Factory story/chapter source and write only validated `AnalysisOutput` JSON to stdout on success
+2. THE CLI SHALL send errors and diagnostics to stderr
+3. THE PyO3 module SHALL expose single-pass and multi-pass functions using JSON-compatible dictionaries
+4. BOTH adapters SHALL support deterministic offline tests without ONNX Runtime
+
+### Requirement 34: Romance Factory Desktop Integration
+
+**User Story:** As an editor, I want to analyze an RF chapter and export tuned
+configuration and results from the desktop app.
+
+#### Acceptance Criteria
+
+1. THE desktop SHALL list RF chapters and build a scope manifest from story drafts
+2. THE desktop SHALL expose `act_fine`, `chapter_coarse`, and `full_multi_pass` presets
+3. THE desktop SHALL export a paste-ready `generate:similarity_map:` YAML block
+4. THE desktop SHALL export validated `AnalysisOutput` v1 JSON
+5. THE persistence policy for RF chapter runs SHALL be explicit; current in-memory runs SHALL NOT be presented as restorable LanceDB sessions

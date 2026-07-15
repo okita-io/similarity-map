@@ -1,4 +1,4 @@
-# Integration Contract — RepetitionReport v1
+# Integration Contract — AnalysisOutput v1
 
 Pipeline-consumable JSON contract shared by the Similarity Map UI, CLI, PyO3 bindings, and Romance Factory surgical editor. **Rust serde types in `similarity-core/src/contract.rs` are the source of truth**; `similarity-core/schemas/analysis_output_v1.schema.json` mirrors them for Python validation.
 
@@ -12,9 +12,9 @@ Pipeline-consumable JSON contract shared by the Similarity Map UI, CLI, PyO3 bin
 | `passes` | `AnalysisPassRecord[]` | One entry per analysis pass (act window, chapter window/stride bundle, …) |
 | `merged_repetition_report` | `RepetitionReportV1` | Deterministic merge of all passes — **primary RF input** |
 
-Example fixture: [`similarity-core/fixtures/analysis_output_v1.example.json`](../../similarity-core/fixtures/analysis_output_v1.example.json)
+Example fixture: [`similarity-core/fixtures/analysis_output_v1.example.json`](../../../similarity-core/fixtures/analysis_output_v1.example.json)
 
-JSON Schema: [`similarity-core/schemas/analysis_output_v1.schema.json`](../../similarity-core/schemas/analysis_output_v1.schema.json)
+JSON Schema: [`similarity-core/schemas/analysis_output_v1.schema.json`](../../../similarity-core/schemas/analysis_output_v1.schema.json)
 
 ## `ScopeManifest` and `segment_id`
 
@@ -118,10 +118,27 @@ Headless entry point (no Tauri / LanceDB): `analyze_prose(input, options, embedd
 
 Multi-pass orchestration: `analyze_prose_multi_pass(MultiPassInput, embedder)` runs the default RF 4-pass bundle (`default_rf_multi_pass_config()`) — act-scoped passes per act, chapter-scoped passes on the full chapter — then merges via `merge_pass_reports`.
 
+## Desktop IPC
+
+The Tauri adapter exposes the same contract through these commands:
+
+| Command | Contract role |
+|---|---|
+| `analyze_text` | Single-pass in-memory analysis; the desktop visualization response includes `analysis_output` |
+| `list_rf_chapters` | Discovers RF chapter drafts for the story picker |
+| `build_rf_chapter_scope` | Returns chapter text and its `ScopeManifest` |
+| `estimate_rf_chapter` | Estimates windows for the selected pass preset |
+| `analyze_rf_chapter` | Runs the selected multi-pass bundle and returns visualization plus `AnalysisOutput` |
+| `serialize_analysis_output` | Validates and pretty-prints v1 JSON for export |
+
+The desktop's `analyze_document` command is a separate LanceDB-backed path used for
+checkpointing, cancellation, and session restore. New pipeline integrations should
+consume `AnalysisOutput` rather than depending on Tauri commands or LanceDB rows.
+
 ## UI YAML round-trip (THE-344)
 
 The Similarity Map app exports a paste-ready `generate:similarity_map:` block
-(`similarity-map/src/settings-yaml-export.js`). Romance Factory loads it from
+(`src/settings-yaml-export.js`). Romance Factory loads it from
 repo-root `settings.yaml` without field renaming.
 
 ### Export shape
@@ -145,8 +162,8 @@ generate:
       # … additional passes …
 ```
 
-RF preset **full multi-pass** matches `default_similarity_map_passes()` in
-`romance_factory.generate.similarity_map_config`.
+RF preset **full multi-pass** matches `default_similarity_map_passes()` in the external
+Romance Factory monorepo module `romance_factory.generate.similarity_map_config`.
 
 ### RF consumption path
 
@@ -155,10 +172,13 @@ RF preset **full multi-pass** matches `default_similarity_map_passes()` in
 3. `analyze_chapter(story_path, chapter, config)` → v1 `AnalysisOutput`
 4. `report_to_patch_ops(merged_report)` → surgical `delete_span` pre-editorial dedupe
 
-Round-trip acceptance: same `pass_config` and `dedupe_outcome_fingerprint`
-whether params are parsed from UI YAML or set in Python directly. Offline
-fixtures: `romance-factory/tests/fixtures/repetition/ui_export/`. Full procedure:
-`romance-factory/docs/design/similarity-map-yaml-roundtrip.md`.
+Round-trip acceptance: same `pass_config` and `dedupe_outcome_fingerprint` whether
+params are parsed from UI YAML or set in Python directly. The referenced fixtures and
+procedure live in the **external Romance Factory monorepo**, not this standalone
+checkout:
+
+- `tests/fixtures/repetition/ui_export/`
+- `docs/design/similarity-map-yaml-roundtrip.md`
 
 ## Related tasks
 

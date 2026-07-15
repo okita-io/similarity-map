@@ -1,20 +1,45 @@
-# Design Document
+# Design Document — Current Architecture and Original Detail
+
+**Last implementation review:** 2026-07-14 (`b097f7d`)
+
+> This document began as the desktop MVP design. The architecture and status notes at
+> the top are current; lower algorithm/data-model sections retain useful original
+> detail and may describe deferred UI behavior. Use
+> [`CURRENT-STATE.md`](../../../CURRENT-STATE.md) for verified feature status.
 
 ## Overview
 
-The Similarity Map is a Tauri 2 desktop application that detects and visualizes exact and fuzzy phrase repetition within a long-form manuscript. The system processes a document through a multi-stage pipeline — import, windowing, embedding, clustering, sub-cell mapping, and rasterization — to produce a portrait-oriented page grid where each cell is a 20×20 pixel canvas encoding spatial repetition data.
+The Similarity Map is a portable Rust repetition-analysis engine with Tauri, CLI, and
+PyO3 adapters. It processes prose through import, windowing, embedding, clustering,
+reporting, and optional visualization. The desktop displays a responsive page grid
+whose cells are derived from 20×20 spatial rasters; headless consumers receive
+`AnalysisOutput` v1.
 
-The architecture separates concerns into a Rust backend (heavy computation, ONNX inference, vector storage) and a Vanilla JS frontend (grid rendering, display controls, interactions). Communication flows through Tauri commands (request/response) and events (streaming progress and page canvases).
+`similarity-core` owns reusable stages and contracts. `src-tauri` owns desktop IPC,
+events, app-data persistence, and a checkpointed LanceDB pipeline. `similarity-cli` and
+`similarity-core-py` are headless adapters. The vanilla JS frontend is served directly
+by Tauri with no Node build step.
 
 Key design goals:
 - Local-only processing — manuscript text never leaves the machine
-- Progressive feedback — grid fills in as pages complete
-- Session persistence — completed analyses restore instantly from LanceDB
-- Interactive exploration — display settings update without re-running the pipeline
+- A stable, pipeline-consumable editorial contract
+- Reusable analysis independent of Tauri and LanceDB
+- Progressive desktop feedback and file-session persistence
+- Deterministic offline contract tests
 
 ### Romance Factory integration contract
 
-Pipeline-consumable JSON export is defined in **[integration-contract.md](./integration-contract.md)** (RepetitionReport v1). Rust serde types live in `similarity-core/src/contract.rs`; JSON Schema at `similarity-core/schemas/analysis_output_v1.schema.json`; example fixture at `similarity-core/fixtures/analysis_output_v1.example.json`.
+Pipeline-consumable JSON export is defined in
+**[integration-contract.md](./integration-contract.md)** (`AnalysisOutput` v1). Rust
+serde types live in `similarity-core/src/contract.rs`; the JSON Schema and fixture live
+under `similarity-core/schemas/` and `similarity-core/fixtures/`.
+
+### Current embedding constraint
+
+The ONNX graph is production code, but `similarity-core/src/embedding.rs` still maps
+whitespace tokens to hash-derived pseudo vocabulary ids. It does not yet run the
+MiniLM WordPiece tokenizer. Contract and orchestration tests are meaningful; semantic
+paraphrase quality is not validated until tokenizer/reference-vector work is complete.
 
 ## Architecture
 
@@ -22,68 +47,35 @@ Pipeline-consumable JSON export is defined in **[integration-contract.md](./inte
 
 ```mermaid
 graph TB
-    subgraph Frontend["Frontend (Vanilla JS + Canvas 2D)"]
-        ISP[Import Settings Panel]
-        GR[Grid Renderer]
-        DP[Detail Panel]
-        TT[Tooltips]
-        DS[Display Settings Controls]
-    end
+    CORE["similarity-core<br/>stages + reports + AnalysisOutput v1"]
+    CLI["similarity-cli<br/>JSON stdout"]
+    PY["similarity-core-py<br/>PyO3"]
+    TAURI["src-tauri<br/>IPC + events + persistence"]
+    FILEPIPE["checkpointed file pipeline<br/>LanceDB + cancel/resume"]
+    UI["src/<br/>Vanilla JS + Canvas 2D"]
+    RF["Romance Factory pipeline"]
 
-    subgraph Backend["Backend (Rust / Tauri 2)"]
-        TC[Tauri Command Layer]
-        subgraph Pipeline["Processing Pipeline"]
-            IMP[Importer / Paginator]
-            TWE[Text Window Engine]
-            EMB[Embedding Engine<br/>ONNX MiniLM-L6-v2]
-            HDB[HDBSCAN Clusterer]
-            KMS[KMeans Stabilizer]
-            CEN[Centroid Computation]
-            SCM[Sub-Cell Mapper]
-            HSV[HSV Color Mapper]
-            RAS[Canvas Rasterizer]
-        end
-        subgraph Storage["Persistence"]
-            LDB[(LanceDB)]
-            DSJ[Display State JSON]
-        end
-    end
-
-    ISP -->|analyze_document| TC
-    DS -->|raster_pages| TC
-    GR -->|get_page_detail| TC
-    TC --> Pipeline
-    Pipeline --> LDB
-    TC -->|page-ready events| GR
-    TC -->|progress events| ISP
-    LDB -->|restore_session| RAS
-    RAS -->|page-ready events| GR
+    CORE --> CLI
+    CORE --> PY
+    CORE --> TAURI
+    FILEPIPE --> TAURI
+    TAURI --> UI
+    CLI --> RF
+    PY --> RF
 ```
 
 ### Component Architecture
 
 ```mermaid
 graph LR
-    subgraph Rust Backend
-        A[Importer] --> B[Window Engine]
-        B --> C[Embedding Engine]
-        C --> D[LanceDB Store]
-        D --> E[HDBSCAN]
-        E --> F[KMeans Stabilizer]
-        F --> G[Centroid Computation]
-        G --> H[Sub-Cell Mapper]
-        H --> I[HSV Color Mapper]
-        I --> J[Canvas Rasterizer]
-    end
-
-    subgraph Frontend
-        K[Grid Renderer] --> L[Mask Layer]
-        K --> M[Dither Engine]
-        K --> N[Tooltip Manager]
-        K --> O[Detail Panel]
-    end
-
-    J -->|Tauri Events| K
+    A[AnalysisInput] --> B[Paginator]
+    B --> C[Window Engine]
+    C --> D[TextEmbedder]
+    D --> E[Clustering]
+    E --> F[Centroid + sub-cell artifacts]
+    F --> G[Repetition reports]
+    G --> H[AnalysisOutput v1]
+    F --> I[Optional VisualizationPayload]
 ```
 
 ### Data Flow
@@ -117,7 +109,8 @@ sequenceDiagram
     end
 
     U->>FE: Adjust Tolerance
-    FE->>FE: Update alpha mask (no IPC)
+    FE->>TC: raster_pages(job_id, all_pages, threshold)
+    TC-->>FE: Updated page canvases
 
     U->>FE: Toggle cluster filter
     FE->>TC: raster_pages(job_id, affected_pages)
@@ -128,11 +121,12 @@ sequenceDiagram
 
 | Layer | Technology | Rationale |
 |---|---|---|
-| Shell | Tauri 2 (Rust + WebView) | Lightweight desktop, native file access, no Electron overhead |
-| Backend | Rust | Performance-critical embedding, clustering, rasterization |
-| Embedding | ONNX Runtime (`ort` crate) — `all-MiniLM-L6-v2` | 22 MB model, Apache 2.0, fully offline after download |
-| Vector Store | LanceDB (local) | Fast columnar storage, no server, metadata-rich queries |
-| Clustering | HDBSCAN (Rust port or Python FFI) | Density-based, no fixed k, noise detection |
+| Core | `similarity-core` Rust crate | Shared stages, reports, visualization, and v1 contract |
+| Desktop | Tauri 2 (Rust + WebView) | File access, events, and local persistence |
+| Headless | `similarity-cli`, `similarity-core-py` | Process and Python integration |
+| Embedding | ONNX Runtime 1.24.x (`ort`) — `all-MiniLM-L6-v2` | Local inference after model download |
+| Vector Store | LanceDB (desktop file path only) | Checkpoints and session restore |
+| Clustering | Rust `hdbscan` + `linfa-clustering` | Density discovery and deterministic labels |
 | Frontend | Vanilla JS + Canvas 2D | Minimal dependencies, ImageBitmap compositing |
 | IPC | Tauri commands + events | Typed Rust→JS streaming for page canvases |
 
@@ -140,80 +134,23 @@ sequenceDiagram
 
 ### Tauri Command Surface
 
-```rust
-// === Session Management ===
+`src-tauri/src/lib.rs` is the source of truth and currently registers 27 commands:
 
-/// Called on document open. Returns existing sessions for the file.
-#[tauri::command]
-async fn check_document_session(path: String) -> Result<DocumentSessionState, AppError>;
+- **Sessions/model:** `check_document_session`, `restore_session`, `discard_job`,
+  `ensure_embedding_model`, `estimate_analysis`, `cancel_analysis`, `resume_analysis`
+- **Analysis:** `analyze_document`, `analyze_text`, `analyze_rf_chapter`,
+  `estimate_rf_chapter`
+- **Romance Factory scope:** `list_rf_chapters`, `build_rf_chapter_scope`
+- **Display/query:** `raster_pages`, `get_page_detail`, `get_cluster_registry`,
+  `get_repetition_report`, `get_visualization_payload`
+- **Settings/state:** `get_app_settings`, `save_app_settings`, `save_display_state`
+- **Saved results:** `list_document_results`, `save_document_result`,
+  `save_document_result_as`, `delete_document_result`,
+  `set_active_document_result`
+- **Export:** `serialize_analysis_output`
 
-/// Re-rasters from stored LanceDB data. Streams page-ready events.
-#[tauri::command]
-async fn restore_session(job_id: String) -> Result<RestoreHandle, AppError>;
-
-/// Deletes all data for a job (windows, job record, display state JSON).
-#[tauri::command]
-async fn discard_job(job_id: String) -> Result<(), AppError>;
-
-// === Model Management ===
-
-/// Verifies model presence; triggers download if missing.
-#[tauri::command]
-async fn ensure_embedding_model() -> Result<ModelStatus, AppError>;
-
-// === Analysis ===
-
-/// Returns live estimates without starting analysis.
-#[tauri::command]
-async fn estimate_analysis(
-    path: String,
-    window_size: u32,
-    stride: u32,
-    tokens_per_page: Option<u32>,
-) -> Result<AnalysisEstimate, AppError>;
-
-/// Starts the full pipeline. Streams progress + page-ready events.
-#[tauri::command]
-async fn analyze_document(
-    path: String,
-    window_size: u32,
-    stride: u32,
-    tokens_per_page: Option<u32>,
-    chapter_break_regex: Option<String>,
-    min_repetitions: u32,
-    min_samples: u32,
-) -> Result<AnalysisHandle, AppError>;
-
-/// Stops at next batch boundary, commits completed work.
-#[tauri::command]
-async fn cancel_analysis(job_id: String) -> Result<CancelResult, AppError>;
-
-/// Resumes embedding from windows_committed.
-#[tauri::command]
-async fn resume_analysis(job_id: String) -> Result<AnalysisHandle, AppError>;
-
-// === Display ===
-
-/// Targeted re-raster for cluster filter or gamma changes.
-#[tauri::command]
-async fn raster_pages(
-    job_id: String,
-    pages: Vec<u32>,
-    threshold: f32,
-    gamma: f32,
-    hidden_clusters: Vec<i32>,
-) -> Result<Vec<PageCanvas>, AppError>;
-
-/// Returns detail data for a specific sub-cell click.
-#[tauri::command]
-async fn get_page_detail(
-    job_id: String,
-    page: u32,
-    row: u8,
-    col: u8,
-    threshold: f32,
-) -> Result<SubCellDetail, AppError>;
-```
+`get_page_detail` is registered but still unimplemented. Headless integrations should
+use `similarity-core`, the CLI, or PyO3 rather than treating IPC as the public contract.
 
 ### Tauri Events
 
@@ -271,9 +208,8 @@ async fn get_page_detail(
 ### Frontend Components
 
 #### Grid Renderer
-- Composites `ImageBitmap` objects into a 10-column CSS grid
-- Manages alpha mask layer for Tolerance (no IPC)
-- Switches `image-rendering` between `pixelated` and `auto` based on zoom
+- Wraps fixed-size page canvases to the available viewport width
+- Keeps `image-rendering: pixelated` / `crisp-edges` at all zoom levels
 - Handles progressive population via page-ready events
 
 #### Import Settings Panel
@@ -282,17 +218,24 @@ async fn get_page_detail(
 - Shows resume banner for partial jobs
 
 #### Display Settings
-- Tolerance slider (frontend-only mask update)
+- Tolerance slider (full `raster_pages` IPC on commit)
 - Cluster Filter toggles (targeted re-raster via IPC)
 - Gamma slider (full re-raster via IPC)
 
 #### Detail Panel
-- Side panel showing window excerpts, cluster info, counterpart links
-- Triggered by macro-cell or sub-cell clicks
+- Cluster inspection from the text-preview path is implemented
+- Grid-cell lookup calls `get_page_detail`, which is currently a backend `todo!()`
 
 #### Tooltip Manager
-- Macro-cell tooltips at base zoom (page number, top clusters, max similarity)
-- Sub-cell tooltips at ≥5×5 px per sub-cell (position %, cluster, similarity, excerpt)
+- `tooltip.js` contains the intended manager but is not mounted by `main.js`
+- Custom grid tooltips are deferred; native `title` text is used in some controls, not
+  on the grid
+
+#### Deferred frontend modules
+
+`tolerance.js` and `dither.js` are implemented as modules but are not connected to the
+running application. They should either be wired with automated frontend tests or
+removed to avoid parallel behavior.
 
 ## Data Models
 

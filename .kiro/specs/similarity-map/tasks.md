@@ -1,5 +1,12 @@
 # Implementation Plan: Similarity Map
 
+**Status:** Historical MVP plan with current implementation addendum
+**Last reviewed:** 2026-07-14 (`b097f7d`)
+
+> A checked task means code was originally added; it does not guarantee the code is
+> still wired or that the acceptance criteria pass. Corrections and post-MVP work are
+> recorded below. See [`CURRENT-STATE.md`](../../../CURRENT-STATE.md) for verification.
+
 ## Overview
 
 This plan implements the Similarity Map Tauri 2 desktop application in dependency order: project scaffolding → storage layer → pipeline stages (import → windowing → embedding → clustering → mapping → rasterization) → frontend grid → session management → display settings → interactions. Each task is a self-contained unit that builds on previous work. Property-based tests use the `proptest` crate and are placed alongside the components they validate.
@@ -456,19 +463,21 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
 - [x] 20. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [x] 21. Frontend — Detail Panel and Tooltips
-  - [x] 21.1 Implement tooltip manager
+- [ ] 21. Frontend — Detail Panel and Tooltips
+  - [ ] 21.1 Wire tooltip manager into the running app
     - Macro-cell tooltips at base zoom: page number, top 3 clusters, max similarity
     - Sub-cell tooltips at ≥ 5×5 px per sub-cell: position %, cluster name, sim score, excerpt (120 chars)
     - No tooltip for sub-cells/macro-cells with no clusters above Tolerance
+    - `tooltip.js` exists but `main.js` does not import or instantiate it
     - _Requirements: 24.1, 24.2, 24.3, 24.4_
 
-  - [x] 21.2 Implement detail panel
+  - [ ] 21.2 Complete grid detail panel
     - Side panel listing windows above Tolerance, grouped by cluster
     - Show window text excerpt, cluster hue indicator, similarity score, counterpart page links
     - Implement `get_page_detail` command for sub-cell click data
     - Scroll/update panel on new cell click without close/reopen
     - No action for clicks on empty/below-threshold sub-cells
+    - Text-preview cluster inspection works, but `get_page_detail` is still `todo!()`
     - _Requirements: 25.1, 25.2, 25.4, 25.5_
 
   - [x] 21.3 Implement counterpart navigation
@@ -491,8 +500,31 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
     - Block analysis until model available
     - _Requirements: 27.2, 27.4, 5.5_
 
-- [x] 23. Final checkpoint — Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [ ] 23. Final checkpoint — Ensure all tests pass
+  - Component suites pass, but `cargo test --workspace` currently fails to compile the
+    `similarity-cli` unit-test target because `build_scope_manifest` is not imported.
+
+- [x] 24. Post-MVP portable analysis platform
+  - [x] 24.1 Extract reusable algorithms and data contracts into `similarity-core`
+  - [x] 24.2 Add in-memory `analyze_prose` with pluggable `TextEmbedder`
+  - [x] 24.3 Add act/chapter multi-pass orchestration and deterministic merge
+  - [x] 24.4 Define and validate `AnalysisOutput` v1 with schema and fixture
+  - [x] 24.5 Add `similarity-cli` JSON/RF story adapter
+  - [x] 24.6 Add `similarity-core-py` PyO3 adapter
+  - [x] 24.7 Add RF chapter presets, JSON export, and settings YAML export to desktop
+  - _Requirements: 31, 32, 33, 34_
+
+- [ ] 25. Current convergence and release work
+  - [ ] 25.1 Replace hash-derived pseudo token ids with the MiniLM WordPiece tokenizer
+  - [ ] 25.2 Add reference-vector and semantic-quality tests for production embedding
+  - [ ] 25.3 Fail the persistent desktop pipeline if any embedding batch is missing
+  - [ ] 25.4 Reuse RF multi-pass artifacts instead of embedding again for visualization
+  - [ ] 25.5 Persist `enable_hdbscan` and `link_subphrases` for resume/reload
+  - [ ] 25.6 Wire or remove `tooltip.js`, `tolerance.js`, and `dither.js`
+  - [ ] 25.7 Implement `get_page_detail`
+  - [ ] 25.8 Run the first-launch benchmark or remove benchmark-derived ETA claims
+  - [ ] 25.9 Add Tauri bundle icons and in-repository CI
+  - [ ] 25.10 Repair the aggregate workspace test target
 
 
 ## Notes
@@ -505,6 +537,8 @@ This plan implements the Similarity Map Tauri 2 desktop application in dependenc
 - The frontend uses Vanilla JS + Canvas 2D with no framework dependencies
 - All IPC uses Tauri 2 commands (request/response) and events (streaming)
 - LanceDB provides local persistence with no server dependency
+- The dependency graph below covers the original MVP tasks only; tasks 24–25 are the
+  post-MVP architecture and convergence addendum
 
 ## Task Dependency Graph
 

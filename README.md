@@ -1,12 +1,18 @@
 # Similarity Map
 
-A visual tool for spotting repeated phrases and motifs in long-form prose — at a glance, across the whole manuscript, and down to the exact spot on each page.
+A local manuscript-repetition analyzer with a Tauri desktop visualizer, a reusable
+Rust core, a headless CLI, and Python bindings.
 
-Part of the **Romance Factory** manuscript tooling ecosystem.
+Part of the **Romance Factory** manuscript tooling ecosystem. The versioned
+`AnalysisOutput` contract is designed for editorial-pipeline consumption; the desktop
+app provides spatial exploration and persistent file-based sessions.
 
 ## What it does
 
-Upload a novel or long document and get a **repetition fingerprint**: a portrait-oriented grid where each cell is one page. Color shows *what* is repeating; brightness shows *how closely* it matches; position within each cell shows *where on the page* it appears.
+Analyze a novel or long document and get a **repetition fingerprint**. In the desktop
+app, each grid cell represents a page: color shows *what* is repeating, brightness
+shows *how closely* it matches its cluster centroid, and position shows *where on the
+page* it appears.
 
 The map helps authors and editors answer questions like:
 
@@ -16,21 +22,17 @@ The map helps authors and editors answer questions like:
 
 ## How it looks
 
-The macro-grid is **10 columns wide** (like an open book), with rows growing with page count. Each page cell is a **20×20 pixel canvas** — one pixel per sub-region of the page, so you see both *that* a page repeats something and *where* on that page.
-
-```
-  page 1    page 2    page 3    ...    page 10
- ┌────────┐ ┌────────┐ ┌────────┐       ┌────────┐
- │ 20×20  │ │ 20×20  │ │ 20×20  │  ...  │ 20×20  │
- │ pixels │ │ pixels │ │ pixels │       │ pixels │
- └────────┘ └────────┘ └────────┘       └────────┘
-```
+The macro-grid wraps page cells to the available window width. Each page is rendered
+from a **20×20 RGBA raster** and displayed at a larger CSS-controlled size, so the user
+can see both *that* a page repeats something and *where* on that page.
 
 **Color (hue)** — cluster identity: each recurring phrase/motif gets a distinct color.  
 **Brightness (value)** — how archetypal the match is (brighter = closer to the cluster's core phrasing).  
 **Empty pixels** — no repetition above the current threshold.
 
-Hover for excerpts and similarity scores. Click a page or sub-region to drill into matching passages elsewhere in the document.
+The text preview shows canonical and duplicate spans and can navigate to pages by
+cluster. Direct grid-cell drill-down and custom hover tooltips are not complete; see
+[`CURRENT-STATE.md`](./CURRENT-STATE.md).
 
 ## How it works
 
@@ -46,9 +48,16 @@ flowchart LR
 
 1. **Import** — PDFs keep natural page breaks; plain text is split into configurable token-sized pages (~400 tokens ≈ one printed page).
 2. **Window** — Overlapping text windows slide across each page (size and stride are adjustable).
-3. **Embed** — Each window becomes a vector via a local embedding model (`all-MiniLM-L6-v2`, runs fully offline after first download).
+3. **Embed** — Each window becomes a vector via a local ONNX model
+   (`all-MiniLM-L6-v2`, offline after the first download).
 4. **Cluster** — HDBSCAN finds organic repetition groups; KMeans assigns stable labels so colors stay consistent between runs.
 5. **Visualize** — Windows map to a 20×20 sub-grid per page; clusters render as HSV-colored pixels with similarity-weighted blending when multiple motifs overlap.
+
+> **Embedding-quality warning:** the current ONNX path still feeds hash-derived token
+> IDs to MiniLM instead of the model's WordPiece tokenizer. Exact and strongly lexical
+> repetition can be useful, but paraphrase-level semantic claims are not yet validated.
+> Treat production scores as heuristic until tokenizer integration and reference-vector
+> tests land.
 
 ### Detection scales
 
@@ -63,24 +72,28 @@ Run twice at different phrase lengths (e.g. 20 and 200 tokens) to see both fine-
 
 ## Features
 
-- **Exact and fuzzy matching** — cosine similarity on embeddings catches paraphrases, not just copy-paste
-- **Interactive controls** — tolerance slider, cluster filter, gamma tuning; display settings update instantly
-- **Import settings with live estimates** — window count and embedding time before you commit to a long run
+- **Reusable analysis core** — in-memory single-pass and Romance Factory multi-pass APIs
+- **Versioned editorial output** — validated `AnalysisOutput` v1 JSON with structural span locations
+- **Three adapters** — Tauri desktop, JSON/stdin CLI, and PyO3 Python bindings
+- **Desktop exploration** — page raster, text highlights, tolerance, cluster filter, and gamma controls
+- **Romance Factory workflow** — story/chapter loading, presets, settings YAML export, and JSON export
+- **Saved file results** — named analyses plus LanceDB-backed session restore
 - **Progressive rendering** — the grid fills in page-by-page as analysis runs
 - **Cancel and resume** — partial embedding progress is saved; resume compatible runs or start fresh
-- **Session restore** — reopen a document and reload a previous map in seconds (no re-embedding)
+- **Offline test path** — deterministic embedder validates contracts and orchestration without ONNX
 - **Privacy-first** — local ONNX inference; manuscript text never leaves your machine
 
 ## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Shell | [Tauri 2](https://v2.tauri.app/) (Rust + WebView) |
-| Backend | Rust — embedding, clustering, rasterization |
-| Embeddings | ONNX Runtime, `all-MiniLM-L6-v2` |
-| Vector store | [LanceDB](https://lancedb.com/) |
-| Clustering | HDBSCAN + KMeans stabilization |
-| Frontend | Vanilla JS + Canvas 2D |
+| Portable engine | Rust crate `similarity-core` |
+| Pipeline contract | Serde types + JSON Schema (`AnalysisOutput` v1) |
+| Desktop adapter | [Tauri 2](https://v2.tauri.app/) + LanceDB |
+| Headless adapters | `similarity-cli` and PyO3 `similarity-core-py` |
+| Embeddings | dynamically loaded ONNX Runtime + `all-MiniLM-L6-v2` |
+| Clustering | Rust HDBSCAN + deterministic KMeans stabilization |
+| Frontend | Vanilla JS + Canvas 2D; no Node build step |
 
 ## Building from source
 
@@ -88,7 +101,10 @@ Run twice at different phrase lengths (e.g. 20 and 200 tokens) to see both fine-
 
 - **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
 - **Tauri CLI** — `cargo install tauri-cli --version "^2"`
-- **ONNX Runtime (required)** — embedding uses the `ort` crate with dynamic loading. You need the ONNX Runtime **native shared library** installed separately from the downloaded `.onnx` model file. Without it, analysis will fail at startup (the app checks on launch).
+- **ONNX Runtime 1.24.x (required for production embedding)** — embedding uses
+  `ort` 2.0.0-rc.12 with dynamic loading. The native shared library is separate from
+  the downloaded `.onnx` model. Offline tests that use the deterministic embedder do
+  not require ONNX Runtime.
   - macOS: `brew install onnxruntime`
   - Linux (Debian/Ubuntu): install a system `libonnxruntime` package, or build from [GitHub releases](https://github.com/microsoft/onnxruntime/releases)
   - If the library is not in a standard location, set the full path before running the app:
@@ -142,79 +158,103 @@ Use the **Level** dropdown to filter, **Copy** to paste a session into a bug rep
 ### Running tests
 
 ```bash
-# Run all Rust tests
-cd src-tauri
-cargo test
+# Compile every workspace member
+cargo check --workspace
+
+# Component suites
+cargo test -p similarity-core
+cargo test -p similarity-map
+cargo test -p similarity-cli --test cli_smoke
+cargo test -p similarity-core-py
+
+# Full workspace gate
+cargo test --workspace
 ```
+
+As of 2026-07-14, the component suites pass (305 unit tests plus 2 CLI smoke tests),
+but `cargo test --workspace` exposes one CLI unit-test compile error: the test module in
+`similarity-cli/src/analyze.rs` is missing an import for `build_scope_manifest`.
+`cargo test -p similarity-cli` hits the same test-target defect; the focused
+`--test cli_smoke` command above passes. The separate three-test Python `pytest` suite
+requires `maturin develop` and was not run in this verification.
 
 ### Production build
 
 ```bash
-# Build a release binary (output in src-tauri/target/release/bundle/)
+# Build a release bundle (output under target/release/bundle/)
 cargo tauri build
 ```
 
-This produces platform-specific installers (.dmg on macOS, .deb/.AppImage on Linux, .msi on Windows).
+This produces platform-specific installers (.dmg on macOS, .deb/.AppImage on Linux,
+.msi on Windows). The current config references `src-tauri/icons/*`, but those icon
+assets are not committed; add them before treating the bundle command as a release
+gate.
 
 ### Project structure
 
 ```
 similarity-map/
-├── similarity-core/        # Portable analysis library
-├── similarity-cli/         # Headless CLI (AnalysisOutput JSON stdout)
-├── src/                    # Frontend (Vanilla JS + CSS)
-│   ├── index.html
-│   ├── main.js
-│   ├── grid.js             # Grid renderer (ImageBitmap compositing)
-│   ├── zoom.js             # CSS transform zoom controller
-│   ├── tolerance.js        # Frontend-only alpha mask
-│   ├── dither.js           # Spatial dithering at high zoom
-│   ├── import-settings.js  # Import parameter controls
-│   ├── progress-view.js    # Multi-stage progress UI
-│   ├── display-settings.js # Tolerance/gamma/cluster filter
-│   ├── tooltip.js          # Hover tooltips
-│   ├── detail-panel.js     # Click-to-inspect panel
-│   ├── navigation.js       # Counterpart page navigation
-│   ├── session-dialog.js   # Session restore modal
-│   ├── model-download.js   # Model download progress
-│   └── style.css
-├── src-tauri/              # Rust backend
-│   ├── Cargo.toml
+├── similarity-core/        # Portable stages, contracts, reports, storage primitives
+│   ├── src/analyze_prose.rs
+│   ├── src/multi_pass.rs
+│   ├── src/contract.rs
+│   ├── schemas/
+│   └── fixtures/
+├── similarity-cli/         # AnalysisOutput JSON CLI
+├── similarity-core-py/     # PyO3/Python adapter
+├── src-tauri/              # Desktop adapter plus persistent file pipeline
 │   └── src/
-│       ├── main.rs
-│       ├── lib.rs
-│       ├── types.rs        # Core types and error enums
-│       ├── commands.rs     # Tauri command handlers
-│       ├── events.rs       # Event name constants
-│       ├── pipeline.rs     # Full analysis orchestrator
-│       ├── importer.rs     # PDF + plain text pagination
-│       ├── windowing.rs    # Sliding window generation
-│       ├── embedding.rs    # ONNX batch embedding
-│       ├── clustering.rs   # HDBSCAN + KMeans stabilization
-│       ├── centroid.rs     # Cluster registry computation
-│       ├── subcell.rs      # Sub-cell position mapping
-│       ├── color.rs        # HSV encoding + blending
-│       ├── rasterizer.rs   # 20×20 RGBA canvas output
-│       ├── storage/        # LanceDB schema + CRUD
-│       ├── model.rs        # ONNX model download/verification
-│       ├── benchmark.rs    # Throughput probe + time estimation
-│       ├── hash.rs         # SHA-256 utilities
-│       ├── cancellation.rs # Cancellation token registry
-│       └── display_state.rs # Display state persistence
-└── .kiro/specs/            # Design specification
+│       ├── commands.rs
+│       ├── pipeline.rs
+│       ├── display_state.rs
+│       ├── results_catalog.rs
+│       └── app_settings.rs
+├── src/                    # Static JS/CSS desktop UI and exports
+├── test-data/              # Small manual-test manuscript
+├── ARCHITECTURE.md
+├── CURRENT-STATE.md
+└── .kiro/specs/            # Requirements and integration contract
 ```
 
 ### First run
 
-On first launch the app will download the `all-MiniLM-L6-v2` ONNX model (~22 MB) from Hugging Face and cache it in your app data directory. Subsequent launches skip the download.
+On first launch the desktop app downloads an architecture-specific, quantized
+`all-MiniLM-L6-v2` ONNX model (~23 MB) from Hugging Face and caches it in the Tauri app
+data directory. Subsequent launches skip the download.
 
 ## Project status
 
-Implementation is functionally complete. The full pipeline (import → embed → cluster → rasterize) is wired end-to-end with session persistence, cancellation/resume, and interactive display controls.
+The project is a **credible reusable analysis platform and an incomplete desktop
+product**:
 
-For the full technical specification (data model, IPC commands, clustering parameters, UI behavior, and performance notes), see [`Similarity Map - Design Specification.md`](./Similarity%20Map%20-%20Design%20Specification.md).
+- core, contract, CLI, Python binding, RF multi-pass orchestration, file analysis,
+  persistence, text preview, and exports are implemented;
+- semantic embedding quality is not production-validated because tokenization is still
+  a placeholder;
+- direct grid drill-down, custom tooltips, high-zoom dithering, and the frontend
+  tolerance-mask path are not complete;
+- the desktop file pipeline and in-memory headless pipeline still need convergence.
 
-### Romance Factory JSON export (RepetitionReport v1)
+See [`CURRENT-STATE.md`](./CURRENT-STATE.md) for the verified capability review and
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) for crate boundaries and the recommended
+migration. The original
+[`Similarity Map - Design Specification.md`](./Similarity%20Map%20-%20Design%20Specification.md)
+is retained as a historical/aspirational desktop specification.
+
+### Desktop Romance Factory workflow
+
+The desktop app can load a Romance Factory story, select a chapter, and run one of
+three presets:
+
+- `act_fine` — two act-scoped passes;
+- `chapter_coarse` — two chapter-scoped passes;
+- `full_multi_pass` — all four passes.
+
+The UI can export the merged `AnalysisOutput` v1 JSON and a paste-ready
+`generate:similarity_map:` YAML block. RF chapter runs are currently in-memory and do
+not create restorable LanceDB sessions.
+
+### Romance Factory JSON export (`AnalysisOutput` v1)
 
 Pipeline-consumable analysis output for the RF surgical editor is defined in [`.kiro/specs/similarity-map/integration-contract.md`](./.kiro/specs/similarity-map/integration-contract.md). Rust types: `similarity-core/src/contract.rs`. JSON Schema: `similarity-core/schemas/analysis_output_v1.schema.json`. Example fixture: `similarity-core/fixtures/analysis_output_v1.example.json`.
 
@@ -293,7 +333,12 @@ result = similarity_core.analyze_prose_multi_pass(
 |---|---|
 | `SIMILARITY_MAP_MODEL_PATH` | Full path to `all-MiniLM-L6-v2.onnx` |
 | `SIMILARITY_MAP_MODEL_DIR` | Directory containing the model (or `models/` subdir) |
-| `SIMILARITY_MAP_DATA_DIR` | App-data root (default: `~/Library/Application Support` on macOS) |
+| `SIMILARITY_MAP_DATA_DIR` | Headless app-data root (default: `~/Library/Application Support` on macOS) |
+
+The desktop cache includes Tauri's identifier directory
+(`~/Library/Application Support/com.similarity-map.app/` on macOS). Headless adapters
+do not automatically append that identifier; set `SIMILARITY_MAP_MODEL_PATH` when
+sharing the desktop-cached model.
 
 Tests (offline, no ONNX):
 
@@ -352,7 +397,9 @@ sudo apt install libonnxruntime libonnxruntime-dev
 export ORT_DYLIB_PATH=/usr/lib/x86_64-linux-gnu/libonnxruntime.so
 ```
 
-Romance Factory provides `./scripts/ci_install_onnxruntime.sh` (repo root) for macOS Homebrew or Linux x64/aarch64 release install.
+The external Romance Factory monorepo provides
+`scripts/ci_install_onnxruntime.sh` for macOS Homebrew or Linux x64/aarch64 release
+installation. That script is not part of this standalone repository.
 
 #### Embedding model (`.onnx` file)
 
@@ -362,7 +409,7 @@ Separate from ONNX Runtime — this is the MiniLM weights file (~23 MB quantized
 |---|---|
 | `SIMILARITY_MAP_MODEL_PATH` | Full path to `all-MiniLM-L6-v2.onnx` |
 | `SIMILARITY_MAP_MODEL_DIR` | Directory containing the model (or `models/` subdir) |
-| `SIMILARITY_MAP_DATA_DIR` | App-data root (desktop default: `~/Library/Application Support` on macOS, `~/.local/share` on Linux) |
+| `SIMILARITY_MAP_DATA_DIR` | Headless app-data root (`~/Library/Application Support` on macOS, `~/.local/share` on Linux) |
 
 **CI / headless download example:**
 
@@ -378,7 +425,10 @@ Use `model_qint8_arm64.onnx` on Apple Silicon if you download manually from Hugg
 
 #### Romance Factory CI
 
-Optional workflow: romance-factory [`.github/workflows/similarity-map-ci.yml`](../.github/workflows/similarity-map-ci.yml). Enable weekly runs by setting repository variable **`SIMILARITY_MAP_CI=1`**, or trigger manually from Actions. See [`docs/design/similarity-map-onnx-ci.md`](../docs/design/similarity-map-onnx-ci.md).
+The external Romance Factory monorepo optionally runs
+`.github/workflows/similarity-map-ci.yml` and documents it at
+`docs/design/similarity-map-onnx-ci.md`. Those paths are not present in this standalone
+checkout. This repository currently has no in-tree CI workflow.
 
 #### Troubleshooting
 
@@ -388,8 +438,18 @@ Optional workflow: romance-factory [`.github/workflows/similarity-map-ci.yml`](.
 | Progress stuck at 0% during embed | ORT **version mismatch** | Use ONNX Runtime 1.24.x, not 1.20.x |
 | `Failed to load ONNX Runtime from …` | Wrong arch or corrupt dylib | Reinstall; confirm `file "$ORT_DYLIB_PATH"` matches your CPU |
 | `ONNX model not found at …` | Model not cached | Set `SIMILARITY_MAP_MODEL_DIR` or download `.onnx` (see above) |
-| PyO3 `import similarity_core` fails | Extension not built | From romance-factory root: `./scripts/build_similarity_core.sh` |
+| PyO3 `import similarity_core` fails | Extension not built | Run `maturin develop` in `similarity-core-py/`; the external RF monorepo also has a build script |
 | `test_embedder=True` works, production fails | Missing ORT or model | Expected — offline tests skip native deps |
+
+## Documentation
+
+- [`CURRENT-STATE.md`](./CURRENT-STATE.md) — verified utility, test results, and known gaps
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — crate boundaries and data flows
+- [Integration contract](./.kiro/specs/similarity-map/integration-contract.md) —
+  canonical `AnalysisOutput` v1 shape and merge rules
+- [`AGENTS.md`](./AGENTS.md) — contributor and automation environment guide
+- [Historical design specification](./Similarity%20Map%20-%20Design%20Specification.md) —
+  original desktop intent, including deferred behavior
 
 
 ## License
