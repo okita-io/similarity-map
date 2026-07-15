@@ -3,7 +3,6 @@
 /// Assigns hue (cluster identity via golden-ratio distribution), saturation (fixed 1.0),
 /// and value (proximity to centroid raised to gamma) to each cluster, then converts
 /// through HSV → linear RGB → sRGB for final pixel output.
-
 use std::collections::HashSet;
 
 use crate::types::SubCellCluster;
@@ -78,9 +77,7 @@ pub fn linear_to_srgb(c: f32) -> f32 {
 /// Each linear channel is gamma-corrected via `linear_to_srgb`, then scaled to [0, 255].
 /// Alpha is passed through directly (already in [0, 1] range).
 pub fn linear_to_srgb_rgba(r: f32, g: f32, b: f32, a: f32) -> [u8; 4] {
-    let to_byte = |c: f32| -> u8 {
-        (linear_to_srgb(c.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8
-    };
+    let to_byte = |c: f32| -> u8 { (linear_to_srgb(c.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8 };
     [
         to_byte(r),
         to_byte(g),
@@ -142,7 +139,10 @@ mod tests {
     #[test]
     fn test_cluster_hue_zero() {
         let h = cluster_hue(0);
-        assert!((h - 0.0).abs() < 1e-6, "cluster 0 hue should be 0.0, got {h}");
+        assert!(
+            (h - 0.0).abs() < 1e-6,
+            "cluster 0 hue should be 0.0, got {h}"
+        );
     }
 
     #[test]
@@ -191,10 +191,7 @@ mod tests {
     fn test_compute_value_positive_sim() {
         let v = compute_value(0.8, 1.5);
         let expected = 0.8_f32.powf(1.5);
-        assert!(
-            (v - expected).abs() < 1e-6,
-            "expected {expected}, got {v}"
-        );
+        assert!((v - expected).abs() < 1e-6, "expected {expected}, got {v}");
     }
 
     #[test]
@@ -206,19 +203,28 @@ mod tests {
     #[test]
     fn test_compute_value_negative_sim_clamped() {
         let v = compute_value(-0.5, 1.5);
-        assert!((v - 0.0).abs() < 1e-6, "negative sim should clamp to 0, got {v}");
+        assert!(
+            (v - 0.0).abs() < 1e-6,
+            "negative sim should clamp to 0, got {v}"
+        );
     }
 
     #[test]
     fn test_compute_value_sim_one_any_gamma() {
         let v = compute_value(1.0, 2.0);
-        assert!((v - 1.0).abs() < 1e-6, "sim=1.0 should give value=1.0, got {v}");
+        assert!(
+            (v - 1.0).abs() < 1e-6,
+            "sim=1.0 should give value=1.0, got {v}"
+        );
     }
 
     #[test]
     fn test_compute_value_gamma_one() {
         let v = compute_value(0.6, 1.0);
-        assert!((v - 0.6).abs() < 1e-6, "gamma=1.0 should pass through, got {v}");
+        assert!(
+            (v - 0.6).abs() < 1e-6,
+            "gamma=1.0 should pass through, got {v}"
+        );
     }
 
     // --- hsv_to_linear_rgb tests ---
@@ -427,10 +433,7 @@ mod tests {
     #[test]
     fn test_blend_multiple_clusters_weighted() {
         // Two clusters with different similarities → weighted blend
-        let clusters = vec![
-            make_cluster(1, 0.95),
-            make_cluster(2, 0.80),
-        ];
+        let clusters = vec![make_cluster(1, 0.95), make_cluster(2, 0.80)];
         let gamma = 1.5;
         let threshold = 0.75;
         let hidden = HashSet::new();
@@ -464,10 +467,7 @@ mod tests {
     #[test]
     fn test_blend_below_threshold_returns_background() {
         // All clusters below threshold → background
-        let clusters = vec![
-            make_cluster(1, 0.70),
-            make_cluster(2, 0.60),
-        ];
+        let clusters = vec![make_cluster(1, 0.70), make_cluster(2, 0.60)];
         let result = blend_sub_cell(&clusters, 1.5, 0.75, &HashSet::new());
         assert_eq!(result, EMPTY_BG_RGBA);
     }
@@ -475,10 +475,7 @@ mod tests {
     #[test]
     fn test_blend_hidden_clusters_excluded() {
         // Two clusters, one hidden → only the visible one contributes
-        let clusters = vec![
-            make_cluster(1, 0.95),
-            make_cluster(2, 0.90),
-        ];
+        let clusters = vec![make_cluster(1, 0.95), make_cluster(2, 0.90)];
         let gamma = 1.5;
         let threshold = 0.75;
         let mut hidden = HashSet::new();
@@ -494,10 +491,7 @@ mod tests {
 
     #[test]
     fn test_blend_all_hidden_returns_background() {
-        let clusters = vec![
-            make_cluster(1, 0.95),
-            make_cluster(2, 0.90),
-        ];
+        let clusters = vec![make_cluster(1, 0.95), make_cluster(2, 0.90)];
         let mut hidden = HashSet::new();
         hidden.insert(1);
         hidden.insert(2);

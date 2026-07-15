@@ -116,7 +116,17 @@ use similarity_core::{
 
 Headless entry point (no Tauri / LanceDB): `analyze_prose(input, options, embedder)` runs paginate → window → embed → cluster → report in memory and returns contract v1 `AnalysisOutput`. Use `DeterministicTestEmbedder` in unit tests without ONNX.
 
-Multi-pass orchestration: `analyze_prose_multi_pass(MultiPassInput, embedder)` runs the default RF 4-pass bundle (`default_rf_multi_pass_config()`) — act-scoped passes per act, chapter-scoped passes on the full chapter — then merges via `merge_pass_reports`.
+Multi-pass orchestration: `analyze_prose_multi_pass(MultiPassInput, Option<&mut Embedder>)` runs the RF bundle from `default_rf_multi_pass_config()`:
+
+1. chapter-scoped **lexical** primary pass (`chapter_lexical`, no ONNX);
+2. embedding secondary recall — act `50/10`, `100/25` and chapter `200/50`, `400/100`;
+
+then merges via `merge_pass_reports`. Lexical-only configs may pass `None` for the embedder. Missing `method` in YAML/JSON defaults to `embedding` for backward compatibility. Default `min_repetitions` is **2**.
+
+> External Romance Factory follow-up: if RF's `settings.yaml` loader does not yet
+> retain per-pass `method`, embedding-only parsing remains valid, but lexical passes
+> exported from Similarity Map must be preserved end-to-end for RF to skip ONNX on
+> lexical-only bundles.
 
 ## Desktop IPC
 
@@ -150,20 +160,27 @@ generate:
     expand_to_sentences: true
     pre_editorial_dedupe: true
     inject_editorial_issues: true
-    min_repetitions: 3
+    min_repetitions: 2
     min_samples: 3
     enable_hdbscan: true
     link_subphrases: false
     passes:
+      - name: chapter_lexical
+        scope: chapter
+        method: lexical
       - name: act_50_10
         scope: act
+        method: embedding
         window_size: 50
         stride: 10
-      # … additional passes …
+      # … additional embedding recall passes …
 ```
 
-RF preset **full multi-pass** matches `default_similarity_map_passes()` in the external
-Romance Factory monorepo module `romance_factory.generate.similarity_map_config`.
+RF preset **full multi-pass** prepends `chapter_lexical` and keeps embedding act
+`50/10` + `100/25` and chapter `200/50` + `400/100` as secondary recall. Missing
+`method` defaults to `embedding`. If the external Romance Factory YAML parser does
+not yet retain `method`, document that follow-up in RF; Similarity Map export already
+emits it.
 
 ### RF consumption path
 

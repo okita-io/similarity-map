@@ -253,9 +253,7 @@ pub fn derive_cluster_enrichments_v1(
     derive_enrichments_from_instances(&instances)
 }
 
-fn derive_enrichments_from_instances(
-    instances: &[(u32, f32, &str)],
-) -> (bool, bool, SuggestedOp) {
+fn derive_enrichments_from_instances(instances: &[(u32, f32, &str)]) -> (bool, bool, SuggestedOp) {
     if instances.is_empty() {
         return (false, false, SuggestedOp::RewriteSpan);
     }
@@ -264,9 +262,7 @@ fn derive_enrichments_from_instances(
     let cross_act = acts.len() > 1;
     let duplicates = &instances[1..];
     let blast = duplicate_blast_radius_words(duplicates.iter().map(|(_, _, text)| *text));
-    let all_high = duplicates
-        .iter()
-        .all(|(_, sim, _)| *sim >= HIGH_SIMILARITY);
+    let all_high = duplicates.iter().all(|(_, sim, _)| *sim >= HIGH_SIMILARITY);
 
     let suggested_op = if cross_act {
         if blast > PARAGRAPH_WORD_THRESHOLD {
@@ -310,11 +306,8 @@ pub fn resolve_span_location(
         if doc_char_start >= act.doc_char_start && doc_char_start < act.doc_char_end {
             for para in &act.paragraphs {
                 if doc_char_start >= para.doc_char_start && doc_char_start < para.doc_char_end {
-                    let para_text = slice_document_text(
-                        document_text,
-                        para.doc_char_start,
-                        para.doc_char_end,
-                    );
+                    let para_text =
+                        slice_document_text(document_text, para.doc_char_start, para.doc_char_end);
                     let local_start = doc_char_start.saturating_sub(para.doc_char_start) as usize;
                     let sentence_index = sentence_index_at_char_offset(&para_text, local_start);
                     return SpanLocation {
@@ -365,9 +358,10 @@ fn find_act_for_doc_char<'a>(
     manifest: &'a ScopeManifest,
     doc_char: u32,
 ) -> Option<&'a ScopeSegment> {
-    manifest.acts.iter().find(|act| {
-        doc_char >= act.doc_char_start && doc_char < act.doc_char_end
-    })
+    manifest
+        .acts
+        .iter()
+        .find(|act| doc_char >= act.doc_char_start && doc_char < act.doc_char_end)
 }
 
 /// Clip and optionally expand a span within its containing act.
@@ -417,13 +411,7 @@ pub fn build_repetition_report(
     windows: &[WindowData],
     expand_to_sentences: bool,
 ) -> RepetitionReport {
-    build_repetition_report_with_manifest(
-        job_id,
-        document_text,
-        windows,
-        expand_to_sentences,
-        None,
-    )
+    build_repetition_report_with_manifest(job_id, document_text, windows, expand_to_sentences, None)
 }
 
 /// Like [`build_repetition_report`] but resolves [`SpanLocation`] when `manifest` is set.
@@ -496,9 +484,8 @@ pub fn build_repetition_report_from_registry(
 
                     let text = slice_document_text(document_text, start, end);
                     let similarity = best_similarity_in_span(&cluster_windows, start, end);
-                    let location = manifest.map(|m| {
-                        resolve_span_location(document_text, m, start, end)
-                    });
+                    let location =
+                        manifest.map(|m| resolve_span_location(document_text, m, start, end));
 
                     EditSpan {
                         cluster_id: info.cluster_id,
@@ -626,11 +613,62 @@ fn slice_document_text(document_text: &str, start: u32, end: u32) -> String {
 }
 
 fn best_similarity_in_span(cluster_windows: &[&WindowData], start: u32, end: u32) -> f32 {
-    cluster_windows
+    let overlapping: Vec<&&WindowData> = cluster_windows
         .iter()
         .filter(|w| w.doc_char_start < end && w.doc_char_end > start)
-        .map(|_| 1.0_f32)
+        .collect();
+    if overlapping.is_empty() {
+        return 0.0;
+    }
+
+    // Centroid over the full cluster, then score overlapping members for real values.
+    let dim = cluster_windows
+        .iter()
+        .map(|w| w.embedding.len())
+        .max()
+        .unwrap_or(0);
+    if dim == 0 {
+        return 0.0;
+    }
+    let mut centroid = vec![0.0f32; dim];
+    let mut counted = 0f32;
+    for w in cluster_windows {
+        if w.embedding.len() != dim {
+            continue;
+        }
+        for (i, v) in w.embedding.iter().enumerate() {
+            centroid[i] += *v;
+        }
+        counted += 1.0;
+    }
+    if counted == 0.0 {
+        return 0.0;
+    }
+    for v in centroid.iter_mut() {
+        *v /= counted;
+    }
+
+    overlapping
+        .iter()
+        .filter_map(|w| {
+            if w.embedding.len() != dim {
+                return None;
+            }
+            Some(cosine_similarity_f32(&w.embedding, &centroid))
+        })
         .fold(0.0_f32, f32::max)
+}
+
+fn cosine_similarity_f32(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let denom = norm_a * norm_b;
+    if denom == 0.0 {
+        0.0
+    } else {
+        (dot / denom).clamp(-1.0, 1.0)
+    }
 }
 
 #[cfg(test)]
@@ -922,22 +960,8 @@ mod tests {
 
         let windows = vec![
             make_window("w1", 0, 1, 0, alpha_end, "Alpha block here."),
-            make_window(
-                "w2",
-                1,
-                1,
-                beta_start,
-                beta_end,
-                "Beta block here.",
-            ),
-            make_window(
-                "w3",
-                2,
-                1,
-                gamma_start,
-                gamma_end,
-                "Gamma block here.",
-            ),
+            make_window("w2", 1, 1, beta_start, beta_end, "Beta block here."),
+            make_window("w3", 2, 1, gamma_start, gamma_end, "Gamma block here."),
         ];
 
         let report = build_repetition_report("job-1", doc, &windows, true);
@@ -1008,14 +1032,7 @@ mod tests {
         let inner_start = "First act ends".len() as u32;
         let inner_end = inner_start + 4;
 
-        let windows = vec![make_window(
-            "w1",
-            0,
-            1,
-            inner_start,
-            inner_end,
-            "ends",
-        )];
+        let windows = vec![make_window("w1", 0, 1, inner_start, inner_end, "ends")];
         let manifest = build_scope_manifest(1, doc, 0);
 
         let report =

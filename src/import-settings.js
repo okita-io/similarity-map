@@ -89,7 +89,7 @@ export class ImportSettingsPanel {
       tokensPerPage: 400,
       phraseLength: 20,
       stride: 5, // max(1, floor(20 * 0.25))
-      minRepetitions: 3,
+      minRepetitions: 2,
       minSamples: 3,
       enableHdbscan: true,
       linkSubphrases: false,

@@ -12,18 +12,16 @@ use std::time::Instant;
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
-use similarity_core::cancellation::{self};
-use similarity_core::clustering::{
-    derive_min_cluster_size, validate_clustering_params,
-};
-use similarity_core::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
-use similarity_core::report::pages_to_document_text;
-use similarity_core::build_scope_manifest;
-use similarity_core::run_clustering_stages_from_embeddings;
 use crate::events;
+use crate::rasterizer::{encode_canvas_base64, rasterize_page};
+use similarity_core::build_scope_manifest;
+use similarity_core::cancellation::{self};
+use similarity_core::clustering::{derive_min_cluster_size, validate_clustering_params};
+use similarity_core::embedding::{EmbeddingEngine, DEFAULT_BATCH_SIZE};
 use similarity_core::hash::{compute_document_hash, compute_settings_hash};
 use similarity_core::model;
-use crate::rasterizer::{encode_canvas_base64, rasterize_page};
+use similarity_core::report::pages_to_document_text;
+use similarity_core::run_clustering_stages_from_embeddings;
 use similarity_core::storage::{InsertJobParams, PageRecord, Storage, WindowRecord};
 use similarity_core::subcell::compute_sub_cell;
 use similarity_core::types::*;
@@ -83,6 +81,7 @@ impl EtaEstimator {
 enum Stage {
     Import,
     Windowing,
+    Lexical,
     Embedding,
     Clustering,
     Stabilization,
@@ -97,6 +96,7 @@ impl Stage {
         match self {
             Stage::Import => "import",
             Stage::Windowing => "windowing",
+            Stage::Lexical => "lexical",
             Stage::Embedding => "embedding",
             Stage::Clustering => "clustering",
             Stage::Stabilization => "stabilization",
@@ -173,12 +173,11 @@ async fn persist_clustered_windows(
         })
         .collect();
 
-    store
-        .delete_windows_for_job(job_id)
-        .await
-        .map_err(|e| AppError::Storage(StorageError {
+    store.delete_windows_for_job(job_id).await.map_err(|e| {
+        AppError::Storage(StorageError {
             message: format!("Failed to clear windows before persisting clusters: {}", e),
-        }))?;
+        })
+    })?;
 
     for chunk in records.chunks(PERSIST_WINDOWS_CHUNK) {
         store.batch_insert_windows(chunk).await.map_err(|e| {
@@ -338,7 +337,7 @@ pub async fn run_pipeline(
         .insert_job(InsertJobParams {
             job_id: job_id.clone(),
             document_path: config.path.clone(),
-            document_hash,
+            document_hash: document_hash.clone(),
             settings_hash,
             window_size: config.window_size,
             stride: config.stride,
@@ -379,6 +378,36 @@ pub async fn run_pipeline(
             message: format!("Failed to insert page records: {}", e),
         })
     })?;
+
+    // ─── Stage 4b: Lexical primary pass (persisted as AnalysisOutput sidecar) ─
+    emit_stage_progress(&app_handle, &job_id, Stage::Lexical, 0.0, 0, 0, 0.0);
+    let document_text = pages_to_document_text(&pages);
+    match run_and_persist_lexical_primary(
+        &app_data_dir,
+        &job_id,
+        &document_text,
+        &config,
+        Some(config.path.clone()),
+        Some(document_hash.clone()),
+    ) {
+        Ok(cluster_count) => {
+            crate::log_info!(
+                app_handle,
+                "pipeline",
+                "lexical primary complete — {} clusters (sidecar written)",
+                cluster_count
+            );
+        }
+        Err(e) => {
+            // Non-fatal for embedding grid path; RF export may still work after re-analyze.
+            crate::log_error!(
+                app_handle,
+                "pipeline",
+                "lexical primary failed (continuing with embedding): {:?}",
+                e
+            );
+        }
+    }
 
     // ─── Stage 5: Embed Windows in Batches ───────────────────────────────────
     emit_stage_progress(
@@ -439,7 +468,11 @@ pub async fn run_pipeline(
         // ─── Check for cancellation before processing this batch ───
         if cancel_token.is_cancelled() {
             // Determine status based on committed work
-            let status = if windows_done > 0 { "partial" } else { "discarded" };
+            let status = if windows_done > 0 {
+                "partial"
+            } else {
+                "discarded"
+            };
             let updated_at = chrono::Utc::now().to_rfc3339();
             let _ = store
                 .update_job_status(&job_id, status, windows_done, &updated_at)
@@ -485,9 +518,9 @@ pub async fn run_pipeline(
                         embedding,
                         cluster_id: -1,       // placeholder until clustering
                         hdbscan_label: -1,    // placeholder
-                        sim_to_centroid: 0.0,  // placeholder
-                        sub_cell_row: 0,       // placeholder
-                        sub_cell_col: 0,       // placeholder
+                        sim_to_centroid: 0.0, // placeholder
+                        sub_cell_row: 0,      // placeholder
+                        sub_cell_col: 0,      // placeholder
                     });
                 }
 
@@ -502,11 +535,7 @@ pub async fn run_pipeline(
             }
             Err(e) => {
                 // Log failed batch and continue (per design: skip failed windows)
-                log::warn!(
-                    "Embedding batch {} failed: {}",
-                    batch_idx,
-                    e
-                );
+                log::warn!("Embedding batch {} failed: {}", batch_idx, e);
             }
         }
 
@@ -569,11 +598,8 @@ pub async fn run_pipeline(
         0.0,
     );
 
-    let min_cluster_size = derive_min_cluster_size(
-        config.min_repetitions,
-        config.window_size,
-        config.stride,
-    );
+    let min_cluster_size =
+        derive_min_cluster_size(config.min_repetitions, config.window_size, config.stride);
 
     if config.enable_hdbscan {
         crate::log_info!(
@@ -633,10 +659,8 @@ pub async fn run_pipeline(
         0.0,
     );
 
-    let page_char_counts: HashMap<u32, u32> = pages
-        .iter()
-        .map(|p| (p.page_num, p.char_count))
-        .collect();
+    let page_char_counts: HashMap<u32, u32> =
+        pages.iter().map(|p| (p.page_num, p.char_count)).collect();
 
     persist_clustered_windows(
         &store,
@@ -714,6 +738,56 @@ pub fn compute_resume_progress(current: u32, windows_committed: u32, windows_tot
     }
     let done_in_session = current.saturating_sub(windows_committed);
     done_in_session as f32 / remaining as f32
+}
+
+fn run_and_persist_lexical_primary(
+    app_data_dir: &Path,
+    job_id: &str,
+    document_text: &str,
+    config: &PipelineConfig,
+    document_path: Option<String>,
+    document_hash: Option<String>,
+) -> Result<u32, AppError> {
+    use similarity_core::contract::{
+        build_analysis_output_with_manifest, repetition_report_to_v1, AnalysisPassRecord,
+        PassMethod,
+    };
+    use similarity_core::report::AnalysisScope;
+    use similarity_core::{analyze_lexical, LexicalPassConfig};
+
+    let manifest = build_scope_manifest(1, document_text, 0);
+    let mut lex = LexicalPassConfig::default();
+    lex.min_repetitions = config.min_repetitions.max(2);
+    let (report, _) = analyze_lexical(document_text, &manifest, &lex, job_id)?;
+    let text_len = document_text.len() as u32;
+    let scope = AnalysisScope {
+        chapter: 1,
+        act: None,
+        document_path: document_path.clone(),
+        document_hash: document_hash.clone(),
+        scope_char_start: 0,
+        scope_char_end: text_len,
+        doc_char_start: 0,
+        doc_char_end: text_len,
+    };
+    let v1 = repetition_report_to_v1(&report, &manifest, 0, document_text);
+    let cluster_count = v1.stats.cluster_count;
+    let output = build_analysis_output_with_manifest(
+        scope.clone(),
+        manifest,
+        vec![AnalysisPassRecord {
+            pass_id: "chapter_lexical".into(),
+            pass_label: "Chapter-scoped lexical shingle pass".into(),
+            method: PassMethod::Lexical,
+            scope,
+            window_size: 0,
+            stride: 0,
+            tokens_per_page: None,
+            repetition_report: v1,
+        }],
+    );
+    crate::analysis_output_store::save_analysis_output(app_data_dir, job_id, &output)?;
+    Ok(cluster_count)
 }
 
 /// Resume a partially completed analysis pipeline.
@@ -928,11 +1002,7 @@ pub async fn resume_pipeline(
                 windows_done += records.len() as u32;
             }
             Err(e) => {
-                log::warn!(
-                    "Embedding batch {} failed during resume: {}",
-                    batch_idx,
-                    e
-                );
+                log::warn!("Embedding batch {} failed during resume: {}", batch_idx, e);
             }
         }
 
@@ -1013,10 +1083,8 @@ pub async fn resume_pipeline(
         0.0,
     );
 
-    let page_char_counts: HashMap<u32, u32> = pages
-        .iter()
-        .map(|p| (p.page_num, p.char_count))
-        .collect();
+    let page_char_counts: HashMap<u32, u32> =
+        pages.iter().map(|p| (p.page_num, p.char_count)).collect();
 
     persist_clustered_windows(
         &store,
@@ -1115,10 +1183,7 @@ fn validate_params(config: &PipelineConfig) -> Result<(), AppError> {
         if tpp < 200 || tpp > 2000 {
             return Err(AppError::Validation(ValidationError {
                 field: "tokens_per_page".to_string(),
-                message: format!(
-                    "tokens_per_page must be between 200 and 2000, got {}",
-                    tpp
-                ),
+                message: format!("tokens_per_page must be between 200 and 2000, got {}", tpp),
             }));
         }
     }
@@ -1308,6 +1373,7 @@ mod tests {
     fn test_stage_names() {
         assert_eq!(Stage::Import.as_str(), "import");
         assert_eq!(Stage::Windowing.as_str(), "windowing");
+        assert_eq!(Stage::Lexical.as_str(), "lexical");
         assert_eq!(Stage::Embedding.as_str(), "embedding");
         assert_eq!(Stage::Clustering.as_str(), "clustering");
         assert_eq!(Stage::Stabilization.as_str(), "stabilization");

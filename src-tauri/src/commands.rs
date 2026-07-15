@@ -2,12 +2,12 @@ use tauri::{Emitter, Manager};
 
 use std::collections::HashSet;
 
+use crate::pipeline::{self, PipelineConfig};
 use similarity_core::benchmark;
 use similarity_core::cancellation;
 use similarity_core::importer;
 use similarity_core::model;
 use similarity_core::ort_runtime;
-use crate::pipeline::{self, PipelineConfig};
 use similarity_core::types::*;
 use similarity_core::windowing;
 
@@ -23,14 +23,11 @@ pub async fn check_document_session(
     use similarity_core::storage::Storage;
 
     // 1. Open storage
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to resolve app data directory: {}", e),
-            })
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
     let db_path = app_data_dir.join("similarity_map_db");
     let store = Storage::open(&db_path).await.map_err(|e| {
         AppError::Storage(similarity_core::types::StorageError {
@@ -87,9 +84,7 @@ pub async fn check_document_session(
     let complete_job_info = if let Some(ref job) = complete_job {
         // Get page count from pages table
         let page_count = match store.get_pages_for_job(&job.job_id).await {
-            Ok(page_batches) => {
-                page_batches.iter().map(|b| b.num_rows() as u32).sum()
-            }
+            Ok(page_batches) => page_batches.iter().map(|b| b.num_rows() as u32).sum(),
             Err(_) => 0,
         };
 
@@ -142,24 +137,23 @@ pub async fn restore_session(
 ) -> Result<RestoreHandle, AppError> {
     use crate::display_state::load_display_state;
     use crate::events;
-    use similarity_core::job_data::load_job_render_data;
     use crate::rasterizer::{encode_canvas_base64, rasterize_page};
+    use similarity_core::job_data::load_job_render_data;
 
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to resolve app data directory: {}", e),
-            })
-        })?;
-
-    let db_path = app_data_dir.join("similarity_map_db");
-    let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to open storage: {}", e),
+            message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = similarity_core::storage::Storage::open(&db_path)
+        .await
+        .map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to open storage: {}", e),
+            })
+        })?;
     store.ensure_tables().await.map_err(|e| {
         AppError::Storage(similarity_core::types::StorageError {
             message: format!("Failed to ensure tables: {}", e),
@@ -244,14 +238,11 @@ pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result
     use similarity_core::storage::Storage;
 
     // 1. Resolve app data directory
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to resolve app data directory: {}", e),
-            })
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
 
     // 2. Open storage and delete windows, pages, and job record
     let db_path = app_data_dir.join("similarity_map_db");
@@ -274,6 +265,8 @@ pub async fn discard_job(app_handle: tauri::AppHandle, job_id: String) -> Result
 
     // 3. Delete the associated display state JSON file
     display_state::delete_display_state(&app_data_dir, &job_id)?;
+    crate::analysis_output_store::delete_analysis_output(&app_data_dir, &job_id)?;
+    crate::analysis_output_store::delete_analysis_output(&app_data_dir, &job_id)?;
 
     Ok(())
 }
@@ -286,26 +279,18 @@ pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<Mode
     crate::log_info!(app_handle, "command", "ensure_embedding_model invoked");
 
     if let Err(e) = ort_runtime::ensure_loaded() {
-        crate::log_error!(
-            app_handle,
-            "command",
-            "ONNX Runtime not available: {:?}",
-            e
-        );
+        crate::log_error!(app_handle, "command", "ONNX Runtime not available: {:?}", e);
         return Err(e);
     }
     crate::log_info!(app_handle, "command", "ONNX Runtime ready");
 
     // Resolve the app data directory
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Model(ModelError {
-                message: format!("Failed to resolve app data directory: {}", e),
-                recoverable: false,
-            })
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Model(ModelError {
+            message: format!("Failed to resolve app data directory: {}", e),
+            recoverable: false,
+        })
+    })?;
     crate::log_info!(
         app_handle,
         "command",
@@ -346,9 +331,7 @@ pub async fn ensure_embedding_model(app_handle: tauri::AppHandle) -> Result<Mode
     );
 
     // Get file size for status
-    let size_bytes = std::fs::metadata(&model_file)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size_bytes = std::fs::metadata(&model_file).map(|m| m.len()).unwrap_or(0);
     let size_mb = size_bytes as f32 / (1024.0 * 1024.0);
 
     Ok(ModelStatus {
@@ -398,15 +381,12 @@ pub async fn estimate_analysis(
     let window_count = windowing::estimate_window_count(total_tokens, window_size, stride);
 
     // Try to load benchmark result for time estimation
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Model(ModelError {
-                message: format!("Failed to resolve app data directory: {}", e),
-                recoverable: false,
-            })
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Model(ModelError {
+            message: format!("Failed to resolve app data directory: {}", e),
+            recoverable: false,
+        })
+    })?;
 
     // Load cached benchmark - if unavailable, return estimate with 0 throughput
     // indicating "estimate unavailable"
@@ -487,7 +467,10 @@ pub async fn analyze_document(
 
 /// Stops at next batch boundary, commits completed work.
 #[tauri::command]
-pub async fn cancel_analysis(app_handle: tauri::AppHandle, job_id: String) -> Result<CancelResult, AppError> {
+pub async fn cancel_analysis(
+    app_handle: tauri::AppHandle,
+    job_id: String,
+) -> Result<CancelResult, AppError> {
     let registry = cancellation::global_registry();
 
     // Trigger cancellation for the job
@@ -495,21 +478,20 @@ pub async fn cancel_analysis(app_handle: tauri::AppHandle, job_id: String) -> Re
 
     if !found {
         // Job is not currently running — check if it exists in storage
-        let app_data_dir = app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| {
-                AppError::Storage(similarity_core::types::StorageError {
-                    message: format!("Failed to resolve app data directory: {}", e),
-                })
-            })?;
-
-        let db_path = app_data_dir.join("similarity_map_db");
-        let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+        let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
             AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to open storage: {}", e),
+                message: format!("Failed to resolve app data directory: {}", e),
             })
         })?;
+
+        let db_path = app_data_dir.join("similarity_map_db");
+        let store = similarity_core::storage::Storage::open(&db_path)
+            .await
+            .map_err(|e| {
+                AppError::Storage(similarity_core::types::StorageError {
+                    message: format!("Failed to open storage: {}", e),
+                })
+            })?;
 
         // Try to get the window count for this job to report accurate state
         let windows_committed = store.get_window_count(&job_id).await.unwrap_or(0);
@@ -532,21 +514,20 @@ pub async fn cancel_analysis(app_handle: tauri::AppHandle, job_id: String) -> Re
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Read the current job state from storage
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Storage(similarity_core::types::StorageError {
-                message: format!("Failed to resolve app data directory: {}", e),
-            })
-        })?;
-
-    let db_path = app_data_dir.join("similarity_map_db");
-    let store = similarity_core::storage::Storage::open(&db_path).await.map_err(|e| {
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to open storage: {}", e),
+            message: format!("Failed to resolve app data directory: {}", e),
         })
     })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = similarity_core::storage::Storage::open(&db_path)
+        .await
+        .map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to open storage: {}", e),
+            })
+        })?;
 
     let windows_committed = store.get_window_count(&job_id).await.unwrap_or(0);
     let status = if windows_committed > 0 {
@@ -582,8 +563,8 @@ pub async fn raster_pages(
     gamma: f32,
     hidden_clusters: Vec<i32>,
 ) -> Result<Vec<PageRasterPayload>, AppError> {
-    use similarity_core::job_data::load_job_render_data;
     use crate::rasterizer::{encode_canvas_base64, rasterize_selected_pages};
+    use similarity_core::job_data::load_job_render_data;
     use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
@@ -631,14 +612,113 @@ pub async fn raster_pages(
 /// Returns detail data for a specific sub-cell click.
 #[tauri::command]
 pub async fn get_page_detail(
+    app_handle: tauri::AppHandle,
     job_id: String,
     page: u32,
     row: u8,
     col: u8,
     threshold: f32,
 ) -> Result<SubCellDetail, AppError> {
-    let _ = (job_id, page, row, col, threshold);
-    todo!()
+    use similarity_core::job_data::{load_job_render_data, parse_window_data_from_batches};
+    use similarity_core::storage::Storage;
+
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
+
+    let db_path = app_data_dir.join("similarity_map_db");
+    let store = Storage::open(&db_path).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to open storage: {}", e),
+        })
+    })?;
+    store.ensure_tables().await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to ensure tables: {}", e),
+        })
+    })?;
+
+    let render = load_job_render_data(&store, &job_id).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to load render data: {}", e),
+        })
+    })?;
+    let Some(grid) = render.page_sub_grids.iter().find(|g| g.page == page) else {
+        return Ok(SubCellDetail {
+            window_text: String::new(),
+            cluster_id: -1,
+            similarity: 0.0,
+            matches: vec![],
+        });
+    };
+    let cell = grid.cell(row as usize, col as usize);
+    let Some(top) = cell
+        .clusters
+        .iter()
+        .filter(|c| c.sim_to_centroid >= threshold)
+        .max_by(|a, b| {
+            a.sim_to_centroid
+                .partial_cmp(&b.sim_to_centroid)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    else {
+        return Ok(SubCellDetail {
+            window_text: String::new(),
+            cluster_id: -1,
+            similarity: 0.0,
+            matches: vec![],
+        });
+    };
+
+    let window_batches = store.get_windows_for_job(&job_id).await.map_err(|e| {
+        AppError::Storage(similarity_core::types::StorageError {
+            message: format!("Failed to load windows: {}", e),
+        })
+    })?;
+    let windows = parse_window_data_from_batches(&window_batches);
+    let primary = windows
+        .iter()
+        .filter(|w| w.page == page && w.cluster_id == top.cluster_id)
+        .max_by(|a, b| {
+            // Prefer windows whose span covers this sub-cell region when possible.
+            a.text.len().cmp(&b.text.len())
+        });
+
+    let window_text = primary.map(|w| w.text.clone()).unwrap_or_default();
+    let matches: Vec<WindowMatch> = windows
+        .iter()
+        .filter(|w| w.cluster_id == top.cluster_id && w.page != page)
+        .filter_map(|w| {
+            let other_grid = render.page_sub_grids.iter().find(|g| g.page == w.page)?;
+            // Find first sub-cell on that page containing this cluster.
+            for r in 0..20u8 {
+                for c in 0..20u8 {
+                    let cell = other_grid.cell(r as usize, c as usize);
+                    if cell.clusters.iter().any(|cl| {
+                        cl.cluster_id == top.cluster_id && cl.sim_to_centroid >= threshold
+                    }) {
+                        return Some(WindowMatch {
+                            page: w.page,
+                            window_text: w.text.clone(),
+                            similarity: top.sim_to_centroid,
+                            sub_cell_row: r,
+                            sub_cell_col: c,
+                        });
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    Ok(SubCellDetail {
+        window_text,
+        cluster_id: top.cluster_id,
+        similarity: top.sim_to_centroid,
+        matches,
+    })
 }
 
 /// Returns the cluster registry for a completed job.
@@ -719,7 +799,7 @@ pub async fn get_visualization_payload(
     gamma: Option<f32>,
     expand_to_sentences: Option<bool>,
 ) -> Result<similarity_core::VisualizationPayload, AppError> {
-    use similarity_core::load_visualization_payload;
+    use similarity_core::load_visualization_payload_with_analysis_output;
     use similarity_core::storage::Storage;
     use similarity_core::{DEFAULT_GAMMA, DEFAULT_TOLERANCE};
 
@@ -741,12 +821,16 @@ pub async fn get_visualization_payload(
         })
     })?;
 
-    load_visualization_payload(
+    let analysis_output =
+        crate::analysis_output_store::load_analysis_output(&app_data_dir, &job_id);
+
+    load_visualization_payload_with_analysis_output(
         &store,
         &job_id,
         tolerance.unwrap_or(DEFAULT_TOLERANCE),
         gamma.unwrap_or(DEFAULT_GAMMA),
         expand_to_sentences.unwrap_or(true),
+        analysis_output,
     )
     .await
 }
@@ -767,9 +851,7 @@ pub async fn analyze_text(
     link_subphrases: Option<bool>,
 ) -> Result<similarity_core::VisualizationPayload, AppError> {
     use similarity_core::build_scope_manifest;
-    use similarity_core::{
-        AnalysisInput, AnalyzeProseOptions, DEFAULT_GAMMA, DEFAULT_TOLERANCE,
-    };
+    use similarity_core::{AnalysisInput, AnalyzeProseOptions, DEFAULT_GAMMA, DEFAULT_TOLERANCE};
 
     let params = similarity_core::AnalysisParams {
         window_size,
@@ -827,19 +909,19 @@ pub async fn analyze_text(
         result.output.merged_repetition_report.stats.cluster_count
     );
 
-    result
-        .visualization
-        .ok_or_else(|| {
-            AppError::Validation(similarity_core::types::ValidationError {
-                field: "visualization".into(),
-                message: "analyze_prose did not produce a visualization payload".into(),
-            })
+    result.visualization.ok_or_else(|| {
+        AppError::Validation(similarity_core::types::ValidationError {
+            field: "visualization".into(),
+            message: "analyze_prose did not produce a visualization payload".into(),
         })
+    })
 }
 
 /// List chapters available under a Romance Factory story directory.
 #[tauri::command]
-pub async fn list_rf_chapters(story_path: String) -> Result<similarity_core::RfChapterList, AppError> {
+pub async fn list_rf_chapters(
+    story_path: String,
+) -> Result<similarity_core::RfChapterList, AppError> {
     similarity_core::list_rf_chapters(std::path::Path::new(&story_path))
 }
 
@@ -876,7 +958,9 @@ pub async fn estimate_rf_chapter(
 
 /// Load persisted app settings (RF preset, etc.).
 #[tauri::command]
-pub async fn get_app_settings(app_handle: tauri::AppHandle) -> Result<crate::app_settings::AppSettings, AppError> {
+pub async fn get_app_settings(
+    app_handle: tauri::AppHandle,
+) -> Result<crate::app_settings::AppSettings, AppError> {
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
         AppError::Session(similarity_core::types::SessionError {
             message: format!("Failed to resolve app data directory: {}", e),
@@ -968,11 +1052,7 @@ pub async fn analyze_rf_chapter(
     let job_id = format!(
         "rf_ch{:02}_{}",
         chapter,
-        draft
-            .document_hash
-            .chars()
-            .take(8)
-            .collect::<String>()
+        draft.document_hash.chars().take(8).collect::<String>()
     );
 
     let chapter_scope = chapter_scope_from_manifest(&draft.text, &draft.scope_manifest);
@@ -980,16 +1060,29 @@ pub async fn analyze_rf_chapter(
     multi_scope.document_path = Some(story_path.clone());
     multi_scope.document_hash = Some(draft.document_hash.clone());
 
+    let mut config = multi_pass_config_for_preset(preset_id);
+    config.min_repetitions = min_repetitions;
+    config.min_samples = min_samples;
+    if let Some(enable) = enable_hdbscan {
+        config.enable_hdbscan = enable;
+    }
+    if let Some(link) = link_subphrases {
+        config.link_subphrases = link;
+    }
+    if let Some(tokens) = tokens_per_page {
+        config.tokens_per_page = tokens;
+    }
+
     let multi_input = MultiPassInput {
         text: draft.text.clone(),
         scope_manifest: draft.scope_manifest.clone(),
-        config: multi_pass_config_for_preset(preset_id),
+        config,
         chapter_scope: multi_scope,
         job_id: job_id.clone(),
     };
 
     let mut engine = similarity_core::embedding::EmbeddingEngine::new(&model_path)?;
-    let multi_result = analyze_prose_multi_pass(&multi_input, &mut engine)?;
+    let multi_result = analyze_prose_multi_pass(&multi_input, Some(&mut engine))?;
 
     let viz_artifacts = run_analysis_stages(
         &draft.text,
@@ -1038,14 +1131,11 @@ pub async fn save_display_state(
     app_handle: tauri::AppHandle,
     state: DisplayState,
 ) -> Result<(), AppError> {
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            AppError::Session(similarity_core::types::SessionError {
-                message: format!("Failed to resolve app data directory: {}", e),
-            })
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        AppError::Session(similarity_core::types::SessionError {
+            message: format!("Failed to resolve app data directory: {}", e),
+        })
+    })?;
 
     crate::display_state::save_display_state(&app_data_dir, &state)
 }
@@ -1056,8 +1146,8 @@ async fn load_synced_results_catalog(
     app_handle: &tauri::AppHandle,
     document_path: &str,
 ) -> Result<crate::results_catalog::DocumentResultsCatalog, AppError> {
-    use similarity_core::hash::compute_document_hash;
     use crate::results_catalog::{load_catalog, save_catalog, sync_catalog_with_jobs};
+    use similarity_core::hash::compute_document_hash;
     use similarity_core::storage::Storage;
     use std::collections::{HashMap, HashSet};
 
@@ -1079,11 +1169,14 @@ async fn load_synced_results_catalog(
         })
     })?;
 
-    let batches = store.get_jobs_for_document(document_path).await.map_err(|e| {
-        AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to query jobs: {}", e),
-        })
-    })?;
+    let batches = store
+        .get_jobs_for_document(document_path)
+        .await
+        .map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to query jobs: {}", e),
+            })
+        })?;
     let jobs = Storage::parse_job_records(&batches);
 
     let current_hash = compute_document_hash(std::path::Path::new(document_path)).ok();
@@ -1100,7 +1193,10 @@ async fn load_synced_results_catalog(
     let mut page_counts = HashMap::new();
     for job_id in &valid_job_ids {
         if let Ok(page_batches) = store.get_pages_for_job(job_id).await {
-            let count = page_batches.iter().map(|batch| batch.num_rows() as u32).sum();
+            let count = page_batches
+                .iter()
+                .map(|batch| batch.num_rows() as u32)
+                .sum();
             page_counts.insert(job_id.clone(), count);
         }
     }
@@ -1153,7 +1249,9 @@ pub async fn save_document_result_as(
     job_id: String,
     name: String,
 ) -> Result<crate::results_catalog::DocumentResultsList, AppError> {
-    use crate::results_catalog::{add_result_alias, load_catalog, save_catalog, set_active_result, to_list};
+    use crate::results_catalog::{
+        add_result_alias, load_catalog, save_catalog, set_active_result, to_list,
+    };
     use similarity_core::storage::Storage;
 
     let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
@@ -1179,9 +1277,11 @@ pub async fn save_document_result_as(
             message: format!("Failed to load job: {}", e),
         })
     })?;
-    let job = job.ok_or_else(|| AppError::Session(similarity_core::types::SessionError {
-        message: format!("Job not found: {job_id}"),
-    }))?;
+    let job = job.ok_or_else(|| {
+        AppError::Session(similarity_core::types::SessionError {
+            message: format!("Job not found: {job_id}"),
+        })
+    })?;
 
     if job.status != "complete" {
         return Err(AppError::Session(similarity_core::types::SessionError {
@@ -1192,9 +1292,11 @@ pub async fn save_document_result_as(
     let page_count = store
         .get_pages_for_job(&job_id)
         .await
-        .map_err(|e| AppError::Storage(similarity_core::types::StorageError {
-            message: format!("Failed to load pages: {}", e),
-        }))?
+        .map_err(|e| {
+            AppError::Storage(similarity_core::types::StorageError {
+                message: format!("Failed to load pages: {}", e),
+            })
+        })?
         .iter()
         .map(|batch| batch.num_rows() as u32)
         .sum();

@@ -9,9 +9,7 @@ use crate::clustering::{
 };
 use crate::report::ScopeManifest;
 use crate::subcell::{build_page_sub_grids, WindowSubCellData};
-use crate::types::{
-    AppError, ClusterRegistry, ImportError, Page, ValidationError, Window,
-};
+use crate::types::{AppError, ClusterRegistry, ImportError, Page, ValidationError, Window};
 
 /// Analysis tuning parameters shared by the visual app and Romance Factory integration.
 #[derive(Debug, Clone)]
@@ -127,11 +125,8 @@ pub fn run_clustering(
     windows: &[Window],
 ) -> Result<(Vec<i32>, Vec<i32>), AppError> {
     let window_indices: Vec<u32> = windows.iter().map(|w| w.window_index).collect();
-    let min_cluster_size = derive_min_cluster_size(
-        params.min_repetitions,
-        params.window_size,
-        params.stride,
-    );
+    let min_cluster_size =
+        derive_min_cluster_size(params.min_repetitions, params.window_size, params.stride);
 
     let (hdbscan_labels, mut stable_labels) = if params.enable_hdbscan {
         let labels = run_hdbscan(all_embeddings, min_cluster_size, params.min_samples)?;
@@ -187,10 +182,8 @@ pub fn build_clustering_artifacts(
         }
     }
 
-    let page_char_counts: HashMap<u32, u32> = pages
-        .iter()
-        .map(|p| (p.page_num, p.char_count))
-        .collect();
+    let page_char_counts: HashMap<u32, u32> =
+        pages.iter().map(|p| (p.page_num, p.char_count)).collect();
 
     let subcell_data: Vec<WindowSubCellData> = windows
         .iter()

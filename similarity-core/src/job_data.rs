@@ -2,9 +2,7 @@
 
 use std::collections::HashMap;
 
-use arrow_array::{
-    Array, FixedSizeListArray, Float32Array, Int32Array, StringArray, UInt32Array,
-};
+use arrow_array::{Array, FixedSizeListArray, Float32Array, Int32Array, StringArray, UInt32Array};
 
 use crate::centroid::WindowData;
 use crate::storage::{Storage, StorageError};
@@ -117,9 +115,7 @@ pub async fn load_job_render_data(
 }
 
 /// Parse window rows for cluster registry construction (embeddings + spans).
-pub fn parse_window_data_from_batches(
-    batches: &[arrow_array::RecordBatch],
-) -> Vec<WindowData> {
+pub fn parse_window_data_from_batches(batches: &[arrow_array::RecordBatch]) -> Vec<WindowData> {
     let mut window_data_list: Vec<WindowData> = Vec::new();
 
     for batch in batches {

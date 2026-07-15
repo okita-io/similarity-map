@@ -29,6 +29,7 @@ export const SIMILARITY_MAP_SCHEMA_VERSION = "1";
  * @typedef {Object} ExportPass
  * @property {string} name
  * @property {"act"|"chapter"} scope
+ * @property {"embedding"|"lexical"} [method]
  * @property {number} windowSize
  * @property {number} stride
  */
@@ -46,6 +47,7 @@ export function resolveExportPasses(settings) {
       return preset.passes.map((pass) => ({
         name: pass.name,
         scope: pass.scope,
+        method: pass.method ?? "embedding",
         windowSize: pass.windowSize,
         stride: pass.stride,
       }));
@@ -58,6 +60,7 @@ export function resolveExportPasses(settings) {
     {
       name: `chapter_${windowSize}_${stride}`,
       scope: "chapter",
+      method: "embedding",
       windowSize,
       stride,
     },
@@ -77,12 +80,18 @@ function yamlBool(value) {
  * @returns {string}
  */
 function formatPassBlock(pass) {
-  return [
+  const method = pass.method ?? "embedding";
+  const lines = [
     "      - name: " + pass.name,
     "        scope: " + pass.scope,
-    "        window_size: " + pass.windowSize,
-    "        stride: " + pass.stride,
-  ].join("\n");
+    "        method: " + method,
+  ];
+  if (method === "lexical") {
+    return lines.join("\n");
+  }
+  lines.push("        window_size: " + pass.windowSize);
+  lines.push("        stride: " + pass.stride);
+  return lines.join("\n");
 }
 
 /**

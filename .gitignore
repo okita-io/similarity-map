@@ -33,3 +33,5 @@ WixTools/
 *.dmg
 *.AppImage
 *.deb
+# Local manuscript corpus (keep focused fixtures under test-data/lexical/)
+manuscript.txt

@@ -1,14 +1,14 @@
 use std::path::Path;
 
 use similarity_core::contract::validate_analysis_output;
-use similarity_core::{MultiPassConfig, PassScope, PassSpec};
+use similarity_core::embedding::EmbeddingEngine;
 use similarity_core::report::AnalysisScope;
 use similarity_core::ScopeManifest;
-use similarity_core::embedding::EmbeddingEngine;
 use similarity_core::{
     analyze_prose, analyze_prose_multi_pass, AnalysisInput, AnalyzeProseOptions,
     AnalyzeProseResult, DeterministicTestEmbedder, MultiPassInput,
 };
+use similarity_core::{MultiPassConfig, PassScope, PassSpec};
 
 use crate::pass_config::PassConfigFile;
 use crate::story::ChapterDraft;
@@ -60,6 +60,7 @@ pub fn run_analyze(ctx: AnalyzeContext) -> Result<String, String> {
             &PassSpec {
                 name: format!("chapter-window-{}-{}", params.window_size, params.stride),
                 scope: PassScope::Chapter,
+                method: similarity_core::PassMethod::Embedding,
                 window_size: params.window_size,
                 stride: params.stride,
             },
@@ -81,9 +82,13 @@ fn run_multi_pass(
     input: &MultiPassInput,
     ctx: &AnalyzeContext,
 ) -> Result<similarity_core::MultiPassResult, String> {
+    if !input.config.needs_embedder() {
+        return analyze_prose_multi_pass::<DeterministicTestEmbedder>(input, None)
+            .map_err(|e| e.to_string());
+    }
     if ctx.test_embedder {
         let mut embedder = DeterministicTestEmbedder::new(384);
-        analyze_prose_multi_pass(input, &mut embedder).map_err(|e| e.to_string())
+        analyze_prose_multi_pass(input, Some(&mut embedder)).map_err(|e| e.to_string())
     } else {
         let model_path = ctx
             .model_path
@@ -94,16 +99,11 @@ fn run_multi_pass(
                     .to_string()
             })?;
         if !model_path.is_file() {
-            return Err(format!(
-                "ONNX model not found at {}",
-                model_path.display()
-            ));
+            return Err(format!("ONNX model not found at {}", model_path.display()));
         }
-        let mut engine =
-            EmbeddingEngine::new(&model_path).map_err(|e: similarity_core::types::AppError| {
-                e.to_string()
-            })?;
-        analyze_prose_multi_pass(input, &mut engine).map_err(|e| e.to_string())
+        let mut engine = EmbeddingEngine::new(&model_path)
+            .map_err(|e: similarity_core::types::AppError| e.to_string())?;
+        analyze_prose_multi_pass(input, Some(&mut engine)).map_err(|e| e.to_string())
     }
 }
 
@@ -113,7 +113,10 @@ fn build_options(
     expand_to_sentences: bool,
 ) -> AnalyzeProseOptions {
     let label = match pass.scope {
-        PassScope::Act => format!("Act-scoped phrase pass ({}/{})", pass.window_size, pass.stride),
+        PassScope::Act => format!(
+            "Act-scoped phrase pass ({}/{})",
+            pass.window_size, pass.stride
+        ),
         PassScope::Chapter => format!(
             "Chapter-scoped phrase pass ({}/{})",
             pass.window_size, pass.stride
@@ -149,15 +152,10 @@ fn run_one_pass(
                     .to_string()
             })?;
         if !model_path.is_file() {
-            return Err(format!(
-                "ONNX model not found at {}",
-                model_path.display()
-            ));
+            return Err(format!("ONNX model not found at {}", model_path.display()));
         }
-        let mut engine =
-            EmbeddingEngine::new(&model_path).map_err(|e: similarity_core::types::AppError| {
-                e.to_string()
-            })?;
+        let mut engine = EmbeddingEngine::new(&model_path)
+            .map_err(|e: similarity_core::types::AppError| e.to_string())?;
         analyze_prose(input, options, &mut engine).map_err(|e| e.to_string())
     }
 }
@@ -183,14 +181,13 @@ fn dirs_data_home() -> Option<std::path::PathBuf> {
         std::env::var_os("XDG_DATA_HOME")
             .map(Path::new)
             .map(|p| p.to_path_buf())
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(|h| Path::new(&h).join(".local/share"))
-            })
+            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))
     }
     #[cfg(windows)]
     {
-        std::env::var_os("LOCALAPPDATA").map(Path::new).map(|p| p.to_path_buf())
+        std::env::var_os("LOCALAPPDATA")
+            .map(Path::new)
+            .map(|p| p.to_path_buf())
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
@@ -224,6 +221,7 @@ pub fn context_from_story(
 mod tests {
     use super::*;
     use similarity_core::analysis::AnalysisParams;
+    use similarity_core::build_scope_manifest;
 
     fn sample_text() -> String {
         let phrase = "alpha beta gamma delta epsilon alpha beta gamma delta epsilon";

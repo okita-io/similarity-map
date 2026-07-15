@@ -58,11 +58,7 @@ pub fn merge_overlapping_spans(spans: &[(u32, u32)]) -> Vec<MergedSpan> {
 /// Sentence ends are `.`, `!`, or `?` followed by whitespace or end-of-text.
 /// Paragraph breaks (`\n\n`) also act as hard boundaries when expanding inward
 /// from the span edges.
-pub fn expand_to_sentence_boundaries(
-    document_text: &str,
-    start: u32,
-    end: u32,
-) -> (u32, u32) {
+pub fn expand_to_sentence_boundaries(document_text: &str, start: u32, end: u32) -> (u32, u32) {
     let len = document_text.len();
     if len == 0 {
         return (0, 0);

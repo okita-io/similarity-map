@@ -7,12 +7,10 @@ use std::path::Path;
 
 use uuid::Uuid;
 
-use crate::analysis::{
-    build_clustering_artifacts, paginate_text, run_clustering, AnalysisParams,
-};
+use crate::analysis::{build_clustering_artifacts, paginate_text, run_clustering, AnalysisParams};
 use crate::contract::{
     build_analysis_output_with_manifest, repetition_report_to_v1, AnalysisOutput,
-    AnalysisPassRecord,
+    AnalysisPassRecord, PassMethod,
 };
 use crate::embedding::{embed_windows, l2_normalize, EmbeddingEngine, DEFAULT_BATCH_SIZE};
 use crate::report::{
@@ -155,10 +153,7 @@ impl DeterministicTestEmbedder {
 
 impl TextEmbedder for DeterministicTestEmbedder {
     fn embed_all_windows(&mut self, windows: &[Window]) -> Result<Vec<Vec<f32>>, AppError> {
-        Ok(windows
-            .iter()
-            .map(|w| self.embed_text(&w.text))
-            .collect())
+        Ok(windows.iter().map(|w| self.embed_text(&w.text)).collect())
     }
 }
 
@@ -327,6 +322,7 @@ pub fn analyze_prose(
     let pass = AnalysisPassRecord {
         pass_id: options.pass_id.clone(),
         pass_label: options.pass_label.clone(),
+        method: PassMethod::Embedding,
         scope: scope.clone(),
         window_size: input.params.window_size,
         stride: input.params.stride,
@@ -334,11 +330,8 @@ pub fn analyze_prose(
         repetition_report: v1_report,
     };
 
-    let output = build_analysis_output_with_manifest(
-        scope,
-        input.scope_manifest.clone(),
-        vec![pass],
-    );
+    let output =
+        build_analysis_output_with_manifest(scope, input.scope_manifest.clone(), vec![pass]);
 
     let visualization = if options.include_visualization {
         Some(build_visualization_payload(

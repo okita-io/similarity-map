@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use hdbscan::{Hdbscan, HdbscanHyperParams};
-use linfa::traits::Fit;
 use linfa::prelude::Predict;
+use linfa::traits::Fit;
 use linfa::DatasetBase;
 use linfa_clustering::KMeans;
 use ndarray::Array2;
-use rand_chacha::ChaCha8Rng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 use crate::types::{AppError, ClusteringError, ValidationError};
 
@@ -72,9 +72,7 @@ pub fn run_hdbscan(
     let n = embeddings.len();
     if n <= min_samples as usize {
         return Err(AppError::Clustering(ClusteringError {
-            message: format!(
-                "Too few windows ({n}) for min_samples ({min_samples})"
-            ),
+            message: format!("Too few windows ({n}) for min_samples ({min_samples})"),
         }));
     }
 
@@ -256,16 +254,12 @@ pub fn merge_subsumed_clusters(
         for j in (i + 1)..cluster_ids.len() {
             let a = cluster_ids[i];
             let b = cluster_ids[j];
-            let sim = cosine_similarity(
-                centroids.get(&a).unwrap(),
-                centroids.get(&b).unwrap(),
-            );
+            let sim = cosine_similarity(centroids.get(&a).unwrap(), centroids.get(&b).unwrap());
             if sim < SUBPHRASE_MERGE_THRESHOLD {
                 continue;
             }
 
-            let (child, parent) = if avg_text_len.get(&a).unwrap() < avg_text_len.get(&b).unwrap()
-            {
+            let (child, parent) = if avg_text_len.get(&a).unwrap() < avg_text_len.get(&b).unwrap() {
                 (a, b)
             } else {
                 (b, a)
@@ -699,11 +693,7 @@ mod tests {
     #[test]
     fn test_stabilize_clusters_zero_non_noise_returns_original() {
         // All labels are -1 (noise) → should return original labels unchanged
-        let embeddings = vec![
-            vec![1.0f32; 384],
-            vec![0.5f32; 384],
-            vec![0.3f32; 384],
-        ];
+        let embeddings = vec![vec![1.0f32; 384], vec![0.5f32; 384], vec![0.3f32; 384]];
         let hdbscan_labels = vec![-1, -1, -1];
         let window_indices = vec![0, 1, 2];
 
@@ -766,7 +756,10 @@ mod tests {
         let result1 = stabilize_clusters(&embeddings, &hdbscan_labels, &window_indices);
         let result2 = stabilize_clusters(&embeddings, &hdbscan_labels, &window_indices);
 
-        assert_eq!(result1, result2, "KMeans stabilization must be deterministic");
+        assert_eq!(
+            result1, result2,
+            "KMeans stabilization must be deterministic"
+        );
     }
 
     #[test]
@@ -813,16 +806,17 @@ mod tests {
         assert_eq!(result[9], -1);
 
         // Non-noise windows should have valid cluster IDs
-        let non_noise_ids: Vec<i32> = result.iter()
-            .filter(|&&id| id >= 0)
-            .copied()
-            .collect();
+        let non_noise_ids: Vec<i32> = result.iter().filter(|&&id| id >= 0).copied().collect();
 
         // Should have exactly 2 distinct cluster IDs (k=2)
         let mut distinct_ids: Vec<i32> = non_noise_ids.clone();
         distinct_ids.sort();
         distinct_ids.dedup();
-        assert_eq!(distinct_ids.len(), 2, "Expected exactly 2 distinct cluster IDs");
+        assert_eq!(
+            distinct_ids.len(),
+            2,
+            "Expected exactly 2 distinct cluster IDs"
+        );
 
         // All non-noise IDs should be in range [0, k-1]
         for &id in &non_noise_ids {

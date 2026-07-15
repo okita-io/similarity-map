@@ -117,3 +117,42 @@ def test_analyze_prose_multi_pass_merges_passes():
     assert result["schema_version"] == "1"
     assert len(result["passes"]) == 1
     assert "merged_repetition_report" in result
+
+
+def test_lexical_only_multi_pass_without_onnx():
+    sentence = (
+        "I've found it, she declared, her voice echoing through the vast chamber "
+        "like a prophecy fulfilled and ancient drums."
+    )
+    text = f"{sentence}\n\nBridge keeps copies apart.\n\n{sentence}"
+    pass_config = {
+        "min_repetitions": 2,
+        "min_samples": 2,
+        "enable_hdbscan": False,
+        "passes": [
+            {
+                "name": "chapter_lexical",
+                "scope": "chapter",
+                "method": "lexical",
+            }
+        ],
+    }
+    assert similarity_core.pass_config_needs_embedder(pass_config) is False
+    result = similarity_core.analyze_prose_multi_pass(
+        text,
+        similarity_core.build_scope_manifest(text, chapter=1),
+        pass_config,
+        test_embedder=False,
+    )
+    assert result["schema_version"] == "1"
+    assert result["passes"][0]["pass_id"] == "chapter_lexical"
+    assert result["passes"][0].get("method", "lexical") in (None, "lexical")
+    assert result["merged_repetition_report"]["stats"]["cluster_count"] >= 1
+    assert similarity_core.validate_analysis_output(result) is True
+
+
+def test_default_rf_pass_config_has_lexical_primary():
+    cfg = similarity_core.default_rf_pass_config()
+    assert cfg["min_repetitions"] == 2
+    assert cfg["passes"][0]["name"] == "chapter_lexical"
+    assert cfg["passes"][0]["method"] == "lexical"

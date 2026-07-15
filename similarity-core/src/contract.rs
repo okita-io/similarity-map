@@ -11,6 +11,30 @@ use crate::report::{
     SCHEMA_VERSION,
 };
 
+/// Detection backend for a single analysis pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PassMethod {
+    /// Dense embedding + clustering (ONNX).
+    #[default]
+    Embedding,
+    /// Deterministic lexical shingle matching (no ONNX).
+    Lexical,
+}
+
+impl PassMethod {
+    pub fn is_embedding(&self) -> bool {
+        matches!(self, Self::Embedding)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Embedding => "embedding",
+            Self::Lexical => "lexical",
+        }
+    }
+}
+
 pub use crate::report::resolve_span_location;
 
 /// JSON contract alias for [`ScopeSegment`].
@@ -69,6 +93,9 @@ pub struct AnalysisPassRecord {
     pub pass_id: String,
     pub pass_label: String,
     pub scope: AnalysisScope,
+    /// Detection backend. Missing/`embedding` preserves legacy consumers.
+    #[serde(default, skip_serializing_if = "PassMethod::is_embedding")]
+    pub method: PassMethod,
     pub window_size: u32,
     pub stride: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -269,21 +296,22 @@ fn cluster_summary_to_v1(
         .map(|span| edit_span_to_v1(span, manifest, chapter_text))
         .collect();
 
-    let canonical = spans.first().cloned().unwrap_or_else(|| {
-        edit_span_to_v1(&cluster.canonical, manifest, chapter_text)
-    });
+    let canonical = spans
+        .first()
+        .cloned()
+        .unwrap_or_else(|| edit_span_to_v1(&cluster.canonical, manifest, chapter_text));
     let duplicates: Vec<EditSpanV1> = spans.iter().skip(1).cloned().collect();
 
-    let (cross_act, needs_bridge, suggested_op) = if cluster.spans.iter().any(|s| s.location.is_some())
-    {
-        derive_cluster_enrichments(&cluster.spans)
-    } else {
-        (
-            cluster.cross_act,
-            cluster.needs_bridge,
-            cluster.suggested_op,
-        )
-    };
+    let (cross_act, needs_bridge, suggested_op) =
+        if cluster.spans.iter().any(|s| s.location.is_some()) {
+            derive_cluster_enrichments(&cluster.spans)
+        } else {
+            (
+                cluster.cross_act,
+                cluster.needs_bridge,
+                cluster.suggested_op,
+            )
+        };
 
     ClusterSummaryV1 {
         cluster_id: cluster.cluster_id,
@@ -299,11 +327,7 @@ fn cluster_summary_to_v1(
     }
 }
 
-fn edit_span_to_v1(
-    span: &EditSpan,
-    manifest: &ScopeManifest,
-    chapter_text: &str,
-) -> EditSpanV1 {
+fn edit_span_to_v1(span: &EditSpan, manifest: &ScopeManifest, chapter_text: &str) -> EditSpanV1 {
     let location = span.location.clone().unwrap_or_else(|| {
         resolve_span_location(
             chapter_text,
@@ -350,12 +374,11 @@ pub fn merge_pass_reports(passes: &[AnalysisPassRecord]) -> RepetitionReportV1 {
 
     for pass in passes {
         for cluster in &pass.repetition_report.clusters {
-            let merged_id = find_merge_target(&cluster_map, cluster)
-                .unwrap_or_else(|| {
-                    let id = next_cluster_id;
-                    next_cluster_id += 1;
-                    id
-                });
+            let merged_id = find_merge_target(&cluster_map, cluster).unwrap_or_else(|| {
+                let id = next_cluster_id;
+                next_cluster_id += 1;
+                id
+            });
 
             cluster_map
                 .entry(merged_id)
@@ -452,16 +475,14 @@ fn rekey_cluster(cluster: &ClusterSummaryV1, new_id: i32) -> ClusterSummaryV1 {
 
 fn merge_cluster_summaries(existing: &mut ClusterSummaryV1, incoming: &ClusterSummaryV1) {
     for span in &incoming.spans {
-        if !existing
-            .spans
-            .iter()
-            .any(|s| spans_overlap(
+        if !existing.spans.iter().any(|s| {
+            spans_overlap(
                 s.location.doc_char_start,
                 s.location.doc_char_end,
                 span.location.doc_char_start,
                 span.location.doc_char_end,
-            ))
-        {
+            )
+        }) {
             existing.spans.push(span.clone());
         }
     }
@@ -530,7 +551,9 @@ pub enum ContractError {
 /// Validate an analysis output envelope (schema version + structural invariants).
 pub fn validate_analysis_output(output: &AnalysisOutput) -> Result<(), ContractError> {
     if output.schema_version != SCHEMA_VERSION {
-        return Err(ContractError::UnsupportedSchema(output.schema_version.clone()));
+        return Err(ContractError::UnsupportedSchema(
+            output.schema_version.clone(),
+        ));
     }
     if output.passes.is_empty() {
         return Err(ContractError::Validation(
@@ -560,7 +583,10 @@ pub fn validate_analysis_output(output: &AnalysisOutput) -> Result<(), ContractE
     }
     for act in &output.scope_manifest.acts {
         for para in &act.paragraphs {
-            if !para.segment_id.starts_with(&format!("ch{:02}", output.scope.chapter)) {
+            if !para
+                .segment_id
+                .starts_with(&format!("ch{:02}", output.scope.chapter))
+            {
                 return Err(ContractError::Validation(format!(
                     "segment_id {} does not match chapter {}",
                     para.segment_id, output.scope.chapter
@@ -619,7 +645,10 @@ mod tests {
         let parsed: RepetitionReportV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.clusters.len(), 1);
         assert!(!parsed.clusters[0].spans.is_empty());
-        assert_eq!(parsed.clusters[0].spans[0].location.segment_id, "ch01_a01_p01");
+        assert_eq!(
+            parsed.clusters[0].spans[0].location.segment_id,
+            "ch01_a01_p01"
+        );
     }
 
     #[test]
@@ -674,6 +703,7 @@ mod tests {
         let pass_a = AnalysisPassRecord {
             pass_id: "p1".into(),
             pass_label: "act".into(),
+            method: PassMethod::Embedding,
             scope: AnalysisScope {
                 chapter: 1,
                 act: Some(1),
@@ -702,6 +732,7 @@ mod tests {
         let pass_b = AnalysisPassRecord {
             pass_id: "p2".into(),
             pass_label: "chapter".into(),
+            method: PassMethod::Embedding,
             scope: pass_a.scope.clone(),
             window_size: 200,
             stride: 50,

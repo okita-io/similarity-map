@@ -31,7 +31,7 @@ pub struct RfChapterScope {
     pub story_path: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RfChapterDraft {
     pub chapter: u32,
     pub text: String,
@@ -141,14 +141,14 @@ fn chapters_from_outline(story_path: &Path) -> Result<Vec<u32>, AppError> {
 }
 
 /// Load act draft paths for one chapter, sorted by act number.
-pub fn act_draft_paths_for_chapter(story_path: &Path, chapter: u32) -> Result<Vec<PathBuf>, AppError> {
+pub fn act_draft_paths_for_chapter(
+    story_path: &Path,
+    chapter: u32,
+) -> Result<Vec<PathBuf>, AppError> {
     let drafts_dir = story_path.join("drafts");
     if !drafts_dir.is_dir() {
         return Err(AppError::Import(ImportError {
-            message: format!(
-                "drafts/ not found under {}",
-                story_path.display()
-            ),
+            message: format!("drafts/ not found under {}", story_path.display()),
             path: Some(drafts_dir.display().to_string()),
         }));
     }
@@ -200,15 +200,12 @@ fn load_act_text(path: &Path) -> Result<String, AppError> {
             path: Some(path.display().to_string()),
         })
     })?;
-    parsed
-        .text
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| {
-            AppError::Import(ImportError {
-                message: format!("{} missing non-empty \"text\" field", path.display()),
-                path: Some(path.display().to_string()),
-            })
+    parsed.text.filter(|t| !t.trim().is_empty()).ok_or_else(|| {
+        AppError::Import(ImportError {
+            message: format!("{} missing non-empty \"text\" field", path.display()),
+            path: Some(path.display().to_string()),
         })
+    })
 }
 
 /// Build chapter scope manifest and concatenated prose from on-disk act drafts.

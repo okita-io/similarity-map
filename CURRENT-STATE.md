@@ -1,6 +1,6 @@
 # Similarity Map — Current State
 
-Last verified: 2026-07-14 against `b097f7d`.
+Last verified: 2026-07-14 (lexical primary pass landed).
 
 This document describes the implementation that exists today. The older design and
 requirements documents are useful historical baselines, but they include intended UI
@@ -11,7 +11,7 @@ behavior that is not currently wired.
 Similarity Map has two distinct kinds of utility:
 
 1. **A reusable repetition-analysis platform.** `similarity-core` exposes an in-memory
-   analysis API, a four-pass Romance Factory workflow, and a versioned
+   analysis API, a lexical-first Romance Factory multi-pass workflow, and a versioned
    `AnalysisOutput` JSON contract. The same core is used by a CLI, PyO3 bindings, and
    parts of the Tauri app.
 2. **A desktop manuscript explorer.** The Tauri app imports PDF or text manuscripts,
@@ -27,21 +27,45 @@ the headless core and finish or remove incomplete UI paths.
 
 | Surface | Current role | Verification |
 |---|---|---|
-| `similarity-core` | Headless analysis, clustering, reports, visualization payloads, multi-pass merge, v1 contract | 270 tests passed |
-| `similarity-cli` | JSON/stdin or RF-story analysis; `AnalysisOutput` JSON on stdout | 2 integration smoke tests passed |
+| `similarity-core` | Headless analysis, lexical detector, clustering, reports, visualization payloads, multi-pass merge, v1 contract | 275 lib tests + 8 lexical fixture tests passed; local manuscript acceptance passed when `manuscript.txt` is present |
+| `similarity-cli` | JSON/stdin or RF-story analysis; `AnalysisOutput` JSON on stdout; lexical-only configs without ONNX | Unit + integration smoke tests passed |
 | `similarity-core-py` | PyO3 `analyze_prose` and `analyze_prose_multi_pass` bindings | 2 Rust-side tests passed |
-| `src-tauri` | Desktop IPC, file analysis, LanceDB sessions, app settings, result catalog | 33 tests passed |
-| `src/` | Vanilla JS grid, import/display controls, RF chapter presets, text preview, exports | No automated frontend test suite |
+| `src-tauri` | Desktop IPC, file analysis, LanceDB sessions, app settings, result catalog; RF chapter applies UI `min_repetitions` to multi-pass | 33 tests passed |
+| `src/` | Vanilla JS grid, import/display controls, RF chapter presets (lexical primary), text preview, YAML export with `method` | No automated frontend test suite |
 
-`cargo check --workspace` passes. `cargo test --workspace` currently does not complete
-because the unit-test module in `similarity-cli/src/analyze.rs` calls
-`build_scope_manifest` without importing it. The CLI binary and its integration smoke
-test compile and pass; this is a test-target defect rather than a runtime compile
-failure.
+`cargo check --workspace` and `cargo test --workspace` both pass.
 
 The separate three-test Python `pytest` suite under `similarity-core-py/tests/`
 requires an installed `maturin` development extension and was not executed in this
-review.
+pass.
+
+## Lexical primary pass
+
+RF defaults now prepend a chapter-scoped `method: lexical` pass and use
+`min_repetitions: 2`. Embedding act/chapter windows remain secondary recall.
+
+- Implementation: `similarity-core/src/lexical.rs`
+- Roadmap / fixtures: `LEXICAL-SHINGLE-ROADMAP.md`, `test-data/lexical/`
+- `AnalysisOutput` schema stays at v1; lexical provenance uses `pass_id` /
+  `pass_label` (`chapter_lexical`) plus optional `method`
+- Lexical-only bundles do not require ONNX
+- File LanceDB analysis runs lexical primary and writes
+  `sessions/<job_id>.analysis_output.json`; grid restore attaches it to
+  `VisualizationPayload.analysis_output`
+
+### Romance Factory adapter surface
+
+PyO3 now exports helpers RF can call without reimplementing Rust offsets:
+
+- `build_scope_manifest`, `default_rf_pass_config`, `load_rf_chapter`
+- `validate_analysis_output`, `to_export_json`, `pass_config_needs_embedder`
+
+CLI `--pass-config` accepts either a flat pass bundle or a nested
+`generate.similarity_map` YAML excerpt. Lexical-only smoke:
+`similarity-cli/fixtures/pass_config_lexical_smoke.yaml`.
+
+Remaining out-of-repo follow-up: Romance Factory's settings.yaml loader must retain
+per-pass `method`.
 
 ## Important correctness limit
 
@@ -52,15 +76,18 @@ placeholder for WordPiece tokenization.
 
 Consequences:
 
-- exact and strongly lexical repetition can still produce useful visual structure;
+- exact and strongly lexical repetition should rely on the lexical primary pass;
 - contract, pagination, clustering, merge, and adapter behavior are well covered by
   deterministic offline tests;
 - paraphrase-level or benchmark-grade semantic similarity is **not validated**;
-- production similarity thresholds should be treated as heuristic until a real
+- production embedding thresholds should be treated as heuristic until a real
   MiniLM tokenizer is integrated and checked against reference embeddings.
 
 The deterministic test embedder is intentionally non-semantic. It verifies pipeline
 shape and contract behavior, not production embedding quality.
+
+Report span scores for embedding clusters now use real centroid cosine similarity
+instead of the previous `1.0` stub.
 
 ## Current architecture
 

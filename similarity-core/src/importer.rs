@@ -46,9 +46,7 @@ pub fn import_pdf(path: &Path) -> Result<Vec<Page>, AppError> {
     let page_ids: Vec<_> = doc.get_pages().into_iter().take(pages_to_process).collect();
 
     for (page_num_key, _page_id) in &page_ids {
-        let text = doc
-            .extract_text(&[*page_num_key])
-            .unwrap_or_default();
+        let text = doc.extract_text(&[*page_num_key]).unwrap_or_default();
 
         let token_count = text.split_whitespace().count() as u32;
         let char_count = text.len() as u32;
@@ -389,10 +387,7 @@ pub fn paginate_by_chapter_break(
 
 /// Splits a text segment into sub-pages of at most `tokens_per_page` tokens each.
 /// Returns a Vec of (byte_offset_within_segment, text_slice, token_count).
-fn split_segment_by_token_count(
-    text: &str,
-    tokens_per_page: u32,
-) -> Vec<(usize, &str, u32)> {
+fn split_segment_by_token_count(text: &str, tokens_per_page: u32) -> Vec<(usize, &str, u32)> {
     let mut result = Vec::new();
     let mut offset: usize = 0;
 
@@ -684,7 +679,8 @@ mod tests {
 
     #[test]
     fn test_chapter_break_line_is_first_content_of_new_page() {
-        let text = "Some intro\nChapter 1\nContent of chapter one\nChapter 2\nContent of chapter two";
+        let text =
+            "Some intro\nChapter 1\nContent of chapter one\nChapter 2\nContent of chapter two";
         let pages = paginate_by_chapter_break(text, r"^Chapter\s+\d+", 400).unwrap();
 
         // Chapter 1 page must start with "Chapter 1"

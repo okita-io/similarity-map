@@ -108,8 +108,8 @@ impl EmbeddingEngine {
                 })
             })?;
 
-        let attention_mask_tensor =
-            Tensor::from_array((shape.clone(), attention_mask_data)).map_err(|e| {
+        let attention_mask_tensor = Tensor::from_array((shape.clone(), attention_mask_data))
+            .map_err(|e| {
                 AppError::Embedding(EmbeddingError {
                     message: format!("Failed to create attention_mask tensor: {}", e),
                     window_indices: vec![],
@@ -190,10 +190,7 @@ impl EmbeddingEngine {
                 .collect()
         } else {
             return Err(AppError::Embedding(EmbeddingError {
-                message: format!(
-                    "Unexpected output tensor shape: {:?}",
-                    output_shape
-                ),
+                message: format!("Unexpected output tensor shape: {:?}", output_shape),
                 window_indices: vec![],
             }));
         };

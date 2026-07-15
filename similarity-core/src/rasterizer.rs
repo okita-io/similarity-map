@@ -3,7 +3,6 @@
 /// Iterates the 20×20 sub-cell grid for each page, applies threshold/gamma/hidden
 /// filtering via `blend_sub_cell`, and produces a 1600-byte RGBA pixel array.
 /// Also provides batch rasterization and base64 encoding for the page-ready event.
-
 use std::collections::HashSet;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -87,8 +86,8 @@ pub fn encode_canvas_base64(canvas: &PageCanvas) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SubCellCluster;
     use crate::color::EMPTY_BG_RGBA;
+    use crate::types::SubCellCluster;
 
     /// Helper: create an empty 20×20 grid for a given page.
     fn empty_grid(page: u32) -> PageSubGrid {
@@ -96,7 +95,13 @@ mod tests {
     }
 
     /// Helper: create a grid with a single cluster at a specific cell.
-    fn grid_with_cluster_at(page: u32, row: usize, col: usize, cluster_id: i32, sim: f32) -> PageSubGrid {
+    fn grid_with_cluster_at(
+        page: u32,
+        row: usize,
+        col: usize,
+        cluster_id: i32,
+        sim: f32,
+    ) -> PageSubGrid {
         let mut grid = PageSubGrid::new(page);
         grid.cell_mut(row, col).clusters.push(SubCellCluster {
             cluster_id,
@@ -137,11 +142,18 @@ mod tests {
         let offset = (3 * 20 + 7) * 4;
 
         // The pixel at (3, 7) should be non-transparent (alpha = 255)
-        assert_eq!(canvas.pixels[offset + 3], 255, "alpha should be 255 for valid cluster");
+        assert_eq!(
+            canvas.pixels[offset + 3],
+            255,
+            "alpha should be 255 for valid cluster"
+        );
 
         // Verify a neighboring empty cell is transparent
         let empty_offset = (3 * 20 + 8) * 4;
-        assert_eq!(&canvas.pixels[empty_offset..empty_offset + 4], &EMPTY_BG_RGBA);
+        assert_eq!(
+            &canvas.pixels[empty_offset..empty_offset + 4],
+            &EMPTY_BG_RGBA
+        );
     }
 
     #[test]
@@ -353,9 +365,7 @@ mod tests {
 
     #[test]
     fn test_selected_pages_applies_gamma() {
-        let grids = vec![
-            grid_with_cluster_at(1, 0, 0, 1, 0.9),
-        ];
+        let grids = vec![grid_with_cluster_at(1, 0, 0, 1, 0.9)];
 
         let canvas_low_gamma = rasterize_selected_pages(&grids, &[1], 0.5, 0.75, &HashSet::new());
         let canvas_high_gamma = rasterize_selected_pages(&grids, &[1], 3.0, 0.75, &HashSet::new());
@@ -372,7 +382,12 @@ mod tests {
         // With gamma 0.5, 0.9^0.5 ≈ 0.949 (brighter)
         // With gamma 3.0, 0.9^3.0 ≈ 0.729 (darker)
         // So low_gamma should produce brighter (higher) pixel values
-        assert!(low_r >= high_r, "low gamma should produce brighter pixels: {} vs {}", low_r, high_r);
+        assert!(
+            low_r >= high_r,
+            "low gamma should produce brighter pixels: {} vs {}",
+            low_r,
+            high_r
+        );
     }
 
     #[test]

@@ -1,0 +1,97 @@
+{
+  "manuscript": {
+    "path": "manuscript.txt",
+    "sha256": "6b0a57095fff0dc82527eb6b68c795f0a623eae65e5c3272fcf25fced2d6b2b1",
+    "unicode_chars": 355951,
+    "tracked": false,
+    "note": "Keep local/untracked. Acceptance tests verify hash when file is present."
+  },
+  "acceptance": {
+    "two_occurrences_count": true,
+    "maximal_block_collapse": true,
+    "reject_unrelated_formulaic": true
+  },
+  "anchors": [
+    {
+      "id": "exact_baldwin_11para",
+      "kind": "exact_block",
+      "paragraph_indices": [
+        1161,
+        1172
+      ],
+      "paragraph_count": 11,
+      "word_count": 337,
+      "char_starts": [
+        293536,
+        295482
+      ],
+      "fixture": "exact_baldwin_block.txt",
+      "notes": "Plan cited ~336-word exact block; manuscript has 11 exact paragraphs / 337 words."
+    },
+    {
+      "id": "exact_13para_dawn_subblock",
+      "kind": "exact_block",
+      "paragraph_indices": [
+        1050,
+        1120
+      ],
+      "paragraph_count": 13,
+      "word_count": 347,
+      "fixture": "exact_13para_dawn_subblock.txt"
+    },
+    {
+      "id": "near_dawn_17para_family",
+      "kind": "near_block",
+      "paragraph_indices": [
+        1047,
+        1117
+      ],
+      "paragraph_count": 17,
+      "char_starts": [
+        270340,
+        284476
+      ],
+      "fixture": "near_dawn_block.txt",
+      "notes": "16 exact aligned paragraphs plus a 17th near variation."
+    },
+    {
+      "id": "near_found_it_9para",
+      "kind": "near_scene",
+      "paragraph_indices": [
+        967,
+        980
+      ],
+      "paragraph_count": 9,
+      "char_starts": [
+        252771,
+        254868
+      ],
+      "fixture": "near_found_it_scene.txt"
+    },
+    {
+      "id": "near_what_place_5para",
+      "kind": "near_scene",
+      "paragraph_indices": [
+        479,
+        541
+      ],
+      "paragraph_count": 5,
+      "char_starts": [
+        122816,
+        139801
+      ],
+      "fixture": "near_what_place_scene.txt"
+    },
+    {
+      "id": "short_sentence_paragraph",
+      "kind": "short",
+      "fixture": "short_sentence_paragraph.txt"
+    },
+    {
+      "id": "negative_formulaic",
+      "kind": "negative",
+      "fixture": "negative_formulaic.txt",
+      "notes": "Formulaic echoing voice / court speech \u2014 should not form a repetition cluster."
+    }
+  ]
+}

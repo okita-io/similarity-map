@@ -12,8 +12,11 @@ use crate::contract::{
     build_analysis_output_with_manifest, repetition_report_to_v1, AnalysisOutput,
     AnalysisPassRecord,
 };
+use crate::lexical::{analyze_lexical, LexicalPassConfig};
 use crate::report::{AnalysisScope, AnalysisStats, ScopeManifest, ScopeSegment};
 use crate::types::AppError;
+
+pub use crate::contract::PassMethod;
 
 /// Which manuscript unit a pass targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,11 +27,18 @@ pub enum PassScope {
 }
 
 /// One window/stride bundle within a multi-pass run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PassSpec {
     pub name: String,
     pub scope: PassScope,
+    /// Detection backend. Missing/`embedding` preserves legacy YAML.
+    #[serde(default)]
+    pub method: PassMethod,
+    /// Embedding window size. Unused for lexical passes (may be 0).
+    #[serde(default)]
     pub window_size: u32,
+    /// Embedding stride. Unused for lexical passes (may be 0).
+    #[serde(default)]
     pub stride: u32,
 }
 
@@ -47,6 +57,9 @@ pub struct MultiPassConfig {
     pub expand_to_sentences: bool,
     #[serde(default = "default_tokens_per_page")]
     pub tokens_per_page: u32,
+    /// Optional lexical detector overrides (applied to all lexical passes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lexical: Option<LexicalPassConfig>,
     pub passes: Vec<PassSpec>,
 }
 
@@ -67,7 +80,7 @@ pub struct MultiPassResult {
 }
 
 fn default_min_repetitions() -> u32 {
-    3
+    2
 }
 
 fn default_min_samples() -> u32 {
@@ -113,29 +126,35 @@ impl RfChapterPreset {
     pub fn passes(self) -> Vec<PassSpec> {
         match self {
             Self::ActFine => vec![
+                lexical_primary_pass(),
                 PassSpec {
                     name: "act_50_10".into(),
                     scope: PassScope::Act,
+                    method: PassMethod::Embedding,
                     window_size: 50,
                     stride: 10,
                 },
                 PassSpec {
                     name: "act_100_25".into(),
                     scope: PassScope::Act,
+                    method: PassMethod::Embedding,
                     window_size: 100,
                     stride: 25,
                 },
             ],
             Self::ChapterCoarse => vec![
+                lexical_primary_pass(),
                 PassSpec {
                     name: "chapter_200_50".into(),
                     scope: PassScope::Chapter,
+                    method: PassMethod::Embedding,
                     window_size: 200,
                     stride: 50,
                 },
                 PassSpec {
                     name: "chapter_400_100".into(),
                     scope: PassScope::Chapter,
+                    method: PassMethod::Embedding,
                     window_size: 400,
                     stride: 100,
                 },
@@ -191,30 +210,37 @@ pub fn estimate_rf_chapter_passes(
     let mut total_windows = 0u32;
 
     for spec in &config.passes {
-        let window_count = match spec.scope {
-            PassScope::Act => {
-                let mut count = 0u32;
-                for act in &scope_manifest.acts {
-                    let start = act.scope_char_start as usize;
-                    let end = act.scope_char_end as usize;
-                    let Some(act_slice) = chapter_text.get(start..end) else {
-                        continue;
-                    };
-                    let act_text = act_slice.trim();
-                    if act_text.is_empty() {
-                        continue;
+        let window_count = match spec.method {
+            PassMethod::Lexical => 0,
+            PassMethod::Embedding => match spec.scope {
+                PassScope::Act => {
+                    let mut count = 0u32;
+                    for act in &scope_manifest.acts {
+                        let start = act.scope_char_start as usize;
+                        let end = act.scope_char_end as usize;
+                        let Some(act_slice) = chapter_text.get(start..end) else {
+                            continue;
+                        };
+                        let act_text = act_slice.trim();
+                        if act_text.is_empty() {
+                            continue;
+                        }
+                        let act_manifest = build_scope_manifest(
+                            scope_manifest.chapter,
+                            act_text,
+                            act.doc_char_start,
+                        );
+                        let pages = crate::importer::paginate_scope(&act_manifest, act_text)?;
+                        count +=
+                            generate_windows(&pages, spec.window_size, spec.stride).len() as u32;
                     }
-                    let act_manifest =
-                        build_scope_manifest(scope_manifest.chapter, act_text, act.doc_char_start);
-                    let pages = crate::importer::paginate_scope(&act_manifest, act_text)?;
-                    count += generate_windows(&pages, spec.window_size, spec.stride).len() as u32;
+                    count
                 }
-                count
-            }
-            PassScope::Chapter => {
-                let pages = paginate_by_token_count(chapter_text, config.tokens_per_page)?;
-                generate_windows(&pages, spec.window_size, spec.stride).len() as u32
-            }
+                PassScope::Chapter => {
+                    let pages = paginate_by_token_count(chapter_text, config.tokens_per_page)?;
+                    generate_windows(&pages, spec.window_size, spec.stride).len() as u32
+                }
+            },
         };
         total_windows += window_count;
         pass_estimates.push(RfPassEstimate {
@@ -233,37 +259,43 @@ pub fn estimate_rf_chapter_passes(
     })
 }
 
-/// Default 4-pass bundle from Romance Factory `settings.yaml` / integration contract.
+/// Default RF multi-pass bundle: lexical primary + embedding secondary recall.
 pub fn default_rf_multi_pass_config() -> MultiPassConfig {
     MultiPassConfig {
-        min_repetitions: 3,
+        min_repetitions: 2,
         min_samples: 3,
         enable_hdbscan: true,
         link_subphrases: false,
         expand_to_sentences: true,
         tokens_per_page: 400,
+        lexical: None,
         passes: vec![
+            lexical_primary_pass(),
             PassSpec {
                 name: "act_50_10".into(),
                 scope: PassScope::Act,
+                method: PassMethod::Embedding,
                 window_size: 50,
                 stride: 10,
             },
             PassSpec {
                 name: "act_100_25".into(),
                 scope: PassScope::Act,
+                method: PassMethod::Embedding,
                 window_size: 100,
                 stride: 25,
             },
             PassSpec {
                 name: "chapter_200_50".into(),
                 scope: PassScope::Chapter,
+                method: PassMethod::Embedding,
                 window_size: 200,
                 stride: 50,
             },
             PassSpec {
                 name: "chapter_400_100".into(),
                 scope: PassScope::Chapter,
+                method: PassMethod::Embedding,
                 window_size: 400,
                 stride: 100,
             },
@@ -271,22 +303,44 @@ pub fn default_rf_multi_pass_config() -> MultiPassConfig {
     }
 }
 
+fn lexical_primary_pass() -> PassSpec {
+    PassSpec {
+        name: "chapter_lexical".into(),
+        scope: PassScope::Chapter,
+        method: PassMethod::Lexical,
+        window_size: 0,
+        stride: 0,
+    }
+}
+
 impl MultiPassConfig {
+    /// True when at least one pass requires an embedding model.
+    pub fn needs_embedder(&self) -> bool {
+        self.passes
+            .iter()
+            .any(|pass| pass.method == PassMethod::Embedding)
+    }
+
     pub fn validate(&self) -> Result<(), AppError> {
-        crate::validate_analysis_params(
-            &self.to_analysis_params(&PassSpec {
-                name: "validate".into(),
-                scope: PassScope::Chapter,
-                window_size: 50,
-                stride: 10,
-            }),
-            None,
-        )?;
         if self.passes.is_empty() {
             return Err(AppError::Validation(crate::types::ValidationError {
                 field: "passes".into(),
                 message: "multi-pass config must contain at least one pass".into(),
             }));
+        }
+        if self.needs_embedder() {
+            crate::validate_analysis_params(
+                &self.to_analysis_params(&PassSpec {
+                    name: "validate".into(),
+                    scope: PassScope::Chapter,
+                    method: PassMethod::Embedding,
+                    window_size: 50,
+                    stride: 10,
+                }),
+                None,
+            )?;
+        } else {
+            crate::clustering::validate_clustering_params(self.min_repetitions, self.min_samples)?;
         }
         let mut seen = std::collections::HashSet::new();
         for (i, pass) in self.passes.iter().enumerate() {
@@ -302,20 +356,35 @@ impl MultiPassConfig {
                     message: format!("duplicate pass name {:?}", pass.name),
                 }));
             }
-            if pass.window_size < 5 || pass.window_size > 1500 {
-                return Err(AppError::Validation(crate::types::ValidationError {
-                    field: format!("passes[{i}].window_size"),
-                    message: format!("window_size must be in [5, 1500], got {}", pass.window_size),
-                }));
-            }
-            if pass.stride < 1 || pass.stride > 200 || pass.stride > pass.window_size {
-                return Err(AppError::Validation(crate::types::ValidationError {
-                    field: format!("passes[{i}].stride"),
-                    message: format!(
-                        "stride must be in [1, 200] and <= window_size, got {}",
-                        pass.stride
-                    ),
-                }));
+            match pass.method {
+                PassMethod::Lexical => {
+                    if pass.scope != PassScope::Chapter && pass.scope != PassScope::Act {
+                        return Err(AppError::Validation(crate::types::ValidationError {
+                            field: format!("passes[{i}].scope"),
+                            message: "lexical pass scope must be act or chapter".into(),
+                        }));
+                    }
+                }
+                PassMethod::Embedding => {
+                    if pass.window_size < 5 || pass.window_size > 1500 {
+                        return Err(AppError::Validation(crate::types::ValidationError {
+                            field: format!("passes[{i}].window_size"),
+                            message: format!(
+                                "window_size must be in [5, 1500], got {}",
+                                pass.window_size
+                            ),
+                        }));
+                    }
+                    if pass.stride < 1 || pass.stride > 200 || pass.stride > pass.window_size {
+                        return Err(AppError::Validation(crate::types::ValidationError {
+                            field: format!("passes[{i}].stride"),
+                            message: format!(
+                                "stride must be in [1, 200] and <= window_size, got {}",
+                                pass.stride
+                            ),
+                        }));
+                    }
+                }
             }
         }
         Ok(())
@@ -323,8 +392,8 @@ impl MultiPassConfig {
 
     pub fn to_analysis_params(&self, pass: &PassSpec) -> AnalysisParams {
         AnalysisParams {
-            window_size: pass.window_size,
-            stride: pass.stride,
+            window_size: pass.window_size.max(5),
+            stride: pass.stride.max(1),
             tokens_per_page: Some(self.tokens_per_page),
             chapter_break_regex: None,
             min_repetitions: self.min_repetitions,
@@ -333,19 +402,61 @@ impl MultiPassConfig {
             link_subphrases: self.link_subphrases,
         }
     }
+
+    pub fn lexical_config(&self) -> LexicalPassConfig {
+        let mut cfg = self.lexical.clone().unwrap_or_default();
+        cfg.min_repetitions = self.min_repetitions;
+        cfg
+    }
 }
 
 /// Run all configured passes and merge into one [`AnalysisOutput`].
-pub fn analyze_prose_multi_pass(
+///
+/// `embedder` may be `None` when [`MultiPassConfig::needs_embedder`] is false
+/// (lexical-only bundles).
+pub fn analyze_prose_multi_pass<E: TextEmbedder>(
     input: &MultiPassInput,
-    embedder: &mut impl TextEmbedder,
+    mut embedder: Option<&mut E>,
 ) -> Result<MultiPassResult, AppError> {
     input.config.validate()?;
+    if input.config.needs_embedder() && embedder.is_none() {
+        return Err(AppError::Validation(crate::types::ValidationError {
+            field: "embedder".into(),
+            message: "embedding passes require an embedder / ONNX model".into(),
+        }));
+    }
 
     let mut pass_records = Vec::new();
     for spec in &input.config.passes {
-        match spec.scope {
-            PassScope::Act => {
+        match (spec.method, spec.scope) {
+            (PassMethod::Lexical, PassScope::Chapter) => {
+                pass_records.push(run_lexical_chapter_pass(
+                    &input.text,
+                    &input.scope_manifest,
+                    spec,
+                    &input.config,
+                    &input.chapter_scope,
+                    &input.job_id,
+                )?);
+            }
+            (PassMethod::Lexical, PassScope::Act) => {
+                for act in &input.scope_manifest.acts {
+                    if let Some(record) = run_lexical_act_pass(
+                        &input.text,
+                        &input.scope_manifest,
+                        act,
+                        spec,
+                        &input.config,
+                        &input.job_id,
+                    )? {
+                        pass_records.push(record);
+                    }
+                }
+            }
+            (PassMethod::Embedding, PassScope::Act) => {
+                let embedder = embedder
+                    .as_deref_mut()
+                    .expect("embedder presence checked above");
                 for act in &input.scope_manifest.acts {
                     if let Some(record) = run_act_pass(
                         &input.text,
@@ -360,7 +471,10 @@ pub fn analyze_prose_multi_pass(
                     }
                 }
             }
-            PassScope::Chapter => {
+            (PassMethod::Embedding, PassScope::Chapter) => {
+                let embedder = embedder
+                    .as_deref_mut()
+                    .expect("embedder presence checked above");
                 pass_records.push(run_chapter_pass(
                     &input.text,
                     &input.scope_manifest,
@@ -386,8 +500,7 @@ pub fn analyze_prose_multi_pass(
         chapter_scope.scope_char_end = input.text.len() as u32;
     }
     if chapter_scope.doc_char_end == 0 {
-        chapter_scope.doc_char_end =
-            chapter_scope.doc_char_start + chapter_scope.scope_char_end;
+        chapter_scope.doc_char_end = chapter_scope.doc_char_start + chapter_scope.scope_char_end;
     }
 
     let output = build_analysis_output_with_manifest(
@@ -397,6 +510,81 @@ pub fn analyze_prose_multi_pass(
     );
 
     Ok(MultiPassResult { output })
+}
+
+fn run_lexical_chapter_pass(
+    chapter_text: &str,
+    chapter_manifest: &ScopeManifest,
+    spec: &PassSpec,
+    config: &MultiPassConfig,
+    chapter_scope: &AnalysisScope,
+    job_id: &str,
+) -> Result<AnalysisPassRecord, AppError> {
+    let lex = config.lexical_config();
+    let (report, _) = analyze_lexical(chapter_text, chapter_manifest, &lex, job_id)?;
+    let v1 = repetition_report_to_v1(
+        &report,
+        chapter_manifest,
+        chapter_scope.doc_char_start,
+        chapter_text,
+    );
+    Ok(AnalysisPassRecord {
+        pass_id: spec.name.clone(),
+        pass_label: "Chapter-scoped lexical shingle pass".into(),
+        method: PassMethod::Lexical,
+        scope: chapter_scope.clone(),
+        window_size: spec.window_size,
+        stride: spec.stride,
+        tokens_per_page: None,
+        repetition_report: v1,
+    })
+}
+
+fn run_lexical_act_pass(
+    chapter_text: &str,
+    chapter_manifest: &ScopeManifest,
+    act: &ScopeSegment,
+    spec: &PassSpec,
+    config: &MultiPassConfig,
+    job_id: &str,
+) -> Result<Option<AnalysisPassRecord>, AppError> {
+    let start = act.scope_char_start as usize;
+    let end = act.scope_char_end as usize;
+    let Some(act_slice) = chapter_text.get(start..end) else {
+        return Ok(None);
+    };
+    let act_text = act_slice.trim();
+    if act_text.is_empty() {
+        return Ok(None);
+    }
+    let act_manifest = crate::contract::build_scope_manifest(
+        chapter_manifest.chapter,
+        act_text,
+        act.doc_char_start,
+    );
+    let lex = config.lexical_config();
+    let (report, _) = analyze_lexical(act_text, &act_manifest, &lex, job_id)?;
+    let v1 = repetition_report_to_v1(&report, chapter_manifest, act.doc_char_start, chapter_text);
+    let pass_scope = AnalysisScope {
+        chapter: chapter_manifest.chapter,
+        act: Some(act.act),
+        document_path: None,
+        document_hash: None,
+        scope_char_start: act.scope_char_start,
+        scope_char_end: act.scope_char_end,
+        doc_char_start: act.doc_char_start,
+        doc_char_end: act.doc_char_end,
+    };
+    Ok(Some(AnalysisPassRecord {
+        pass_id: format!("{}_a{:02}", spec.name, act.act),
+        pass_label: format!("Act {} lexical shingle pass", act.act),
+        method: PassMethod::Lexical,
+        scope: pass_scope,
+        window_size: spec.window_size,
+        stride: spec.stride,
+        tokens_per_page: None,
+        repetition_report: v1,
+    }))
 }
 
 fn run_act_pass(
@@ -418,8 +606,11 @@ fn run_act_pass(
         return Ok(None);
     }
 
-    let act_manifest =
-        crate::contract::build_scope_manifest(chapter_manifest.chapter, act_text, act.doc_char_start);
+    let act_manifest = crate::contract::build_scope_manifest(
+        chapter_manifest.chapter,
+        act_text,
+        act.doc_char_start,
+    );
     let params = config.to_analysis_params(spec);
 
     let artifacts = match run_analysis_stages(
@@ -448,6 +639,7 @@ fn run_act_pass(
                     "Act {} phrase pass ({}/{})",
                     act.act, spec.window_size, spec.stride
                 ),
+                method: PassMethod::Embedding,
                 scope: pass_scope,
                 window_size: spec.window_size,
                 stride: spec.stride,
@@ -482,6 +674,7 @@ fn run_act_pass(
             "Act {} phrase pass ({}/{})",
             act.act, spec.window_size, spec.stride
         ),
+        method: PassMethod::Embedding,
         scope: pass_scope,
         window_size: spec.window_size,
         stride: spec.stride,
@@ -521,6 +714,7 @@ fn run_chapter_pass(
                     "Chapter-scoped phrase pass ({}/{})",
                     spec.window_size, spec.stride
                 ),
+                method: PassMethod::Embedding,
                 scope: chapter_scope.clone(),
                 window_size: spec.window_size,
                 stride: spec.stride,
@@ -544,6 +738,7 @@ fn run_chapter_pass(
             "Chapter-scoped phrase pass ({}/{})",
             spec.window_size, spec.stride
         ),
+        method: PassMethod::Embedding,
         scope: chapter_scope.clone(),
         window_size: spec.window_size,
         stride: spec.stride,
@@ -568,8 +763,7 @@ fn empty_pass_report(job_id: &str) -> crate::contract::RepetitionReportV1 {
 fn is_benign_no_repetition_error(err: &AppError) -> bool {
     match err {
         AppError::Clustering(e) => {
-            e.message.contains("No clusters found")
-                || e.message.contains("Too few windows")
+            e.message.contains("No clusters found") || e.message.contains("Too few windows")
         }
         AppError::Import(e) => e.message.contains("no analyzable windows"),
         _ => false,
@@ -579,10 +773,10 @@ fn is_benign_no_repetition_error(err: &AppError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{validate_analysis_output, EditSpanV1, ClusterSummaryV1};
     use crate::analyze_prose::DeterministicTestEmbedder;
     use crate::contract::build_scope_manifest;
-    use crate::report::{AnalysisScope, SpanLocation, SuggestedOp, derive_cluster_enrichments_v1};
+    use crate::contract::{validate_analysis_output, ClusterSummaryV1, EditSpanV1};
+    use crate::report::{derive_cluster_enrichments_v1, AnalysisScope, SpanLocation, SuggestedOp};
 
     fn repeated_chapter_text() -> String {
         let phrase = "alpha beta gamma delta epsilon alpha beta gamma delta epsilon";
@@ -602,12 +796,14 @@ mod tests {
             PassSpec {
                 name: "chapter_a".into(),
                 scope: PassScope::Chapter,
+                method: PassMethod::Embedding,
                 window_size: 5,
                 stride: 5,
             },
             PassSpec {
                 name: "chapter_b".into(),
                 scope: PassScope::Chapter,
+                method: PassMethod::Embedding,
                 window_size: 5,
                 stride: 5,
             },
@@ -633,7 +829,7 @@ mod tests {
         };
 
         let mut embedder = DeterministicTestEmbedder::new(64);
-        let result = analyze_prose_multi_pass(&input, &mut embedder).expect("multi-pass ok");
+        let result = analyze_prose_multi_pass(&input, Some(&mut embedder)).expect("multi-pass ok");
         assert_eq!(result.output.passes.len(), 2);
         validate_analysis_output(&result.output).expect("valid envelope");
 
@@ -658,18 +854,22 @@ mod tests {
     #[test]
     fn rf_preset_pass_counts_match_settings_yaml() {
         let full = RfChapterPreset::FullMultiPass.passes();
-        assert_eq!(full.len(), 4);
-        assert_eq!(full[0].window_size, 50);
-        assert_eq!(full[0].stride, 10);
-        assert_eq!(full[3].window_size, 400);
-        assert_eq!(full[3].stride, 100);
+        assert_eq!(full.len(), 5);
+        assert_eq!(full[0].method, PassMethod::Lexical);
+        assert_eq!(full[0].name, "chapter_lexical");
+        assert_eq!(full[1].window_size, 50);
+        assert_eq!(full[1].stride, 10);
+        assert_eq!(full[4].window_size, 400);
+        assert_eq!(full[4].stride, 100);
 
         let act = RfChapterPreset::ActFine.passes();
-        assert_eq!(act.len(), 2);
-        assert!(act.iter().all(|p| p.scope == PassScope::Act));
+        assert_eq!(act.len(), 3);
+        assert_eq!(act[0].method, PassMethod::Lexical);
+        assert!(act[1].scope == PassScope::Act && act[2].scope == PassScope::Act);
 
         let chapter = RfChapterPreset::ChapterCoarse.passes();
-        assert_eq!(chapter.len(), 2);
+        assert_eq!(chapter.len(), 3);
+        assert_eq!(chapter[0].method, PassMethod::Lexical);
         assert!(chapter.iter().all(|p| p.scope == PassScope::Chapter));
     }
 
@@ -679,20 +879,66 @@ mod tests {
         let manifest = build_scope_manifest(1, &text, 0);
         let est = estimate_rf_chapter_passes(&text, &manifest, RfChapterPreset::ActFine)
             .expect("estimate");
-        assert_eq!(est.passes.len(), 2);
+        assert_eq!(est.passes.len(), 3);
         assert!(est.total_windows > 0);
     }
 
     #[test]
-    fn default_rf_config_has_four_passes() {
+    fn default_rf_config_has_lexical_primary_and_embedding_recall() {
         let cfg = default_rf_multi_pass_config();
-        assert_eq!(cfg.passes.len(), 4);
-        assert_eq!(cfg.passes[0].name, "act_50_10");
-        assert_eq!(cfg.passes[0].scope, PassScope::Act);
-        assert_eq!(cfg.passes[2].name, "chapter_200_50");
-        assert_eq!(cfg.passes[2].scope, PassScope::Chapter);
-        assert_eq!(cfg.passes[2].window_size, 200);
-        assert_eq!(cfg.passes[3].stride, 100);
+        assert_eq!(cfg.min_repetitions, 2);
+        assert_eq!(cfg.passes.len(), 5);
+        assert_eq!(cfg.passes[0].name, "chapter_lexical");
+        assert_eq!(cfg.passes[0].method, PassMethod::Lexical);
+        assert_eq!(cfg.passes[0].scope, PassScope::Chapter);
+        assert_eq!(cfg.passes[1].name, "act_50_10");
+        assert_eq!(cfg.passes[1].scope, PassScope::Act);
+        assert_eq!(cfg.passes[3].name, "chapter_200_50");
+        assert_eq!(cfg.passes[3].scope, PassScope::Chapter);
+        assert_eq!(cfg.passes[3].window_size, 200);
+        assert_eq!(cfg.passes[4].stride, 100);
+    }
+
+    #[test]
+    fn lexical_only_multi_pass_runs_without_embedder() {
+        let sentence = "I've found it, she declared, her voice echoing through the vast chamber like a prophecy fulfilled and ancient drums.";
+        let text = format!("{sentence}\n\nBridge keeps copies apart.\n\n{sentence}");
+        let manifest = build_scope_manifest(1, &text, 0);
+        let config = MultiPassConfig {
+            min_repetitions: 2,
+            min_samples: 2,
+            enable_hdbscan: false,
+            link_subphrases: false,
+            expand_to_sentences: true,
+            tokens_per_page: 400,
+            lexical: None,
+            passes: vec![lexical_primary_pass()],
+        };
+        let text_len = text.len() as u32;
+        let input = MultiPassInput {
+            text,
+            scope_manifest: manifest,
+            config,
+            chapter_scope: AnalysisScope {
+                chapter: 1,
+                act: None,
+                document_path: None,
+                document_hash: None,
+                scope_char_start: 0,
+                scope_char_end: text_len,
+                doc_char_start: 0,
+                doc_char_end: text_len,
+            },
+            job_id: "lex-only".into(),
+        };
+        let result = analyze_prose_multi_pass::<DeterministicTestEmbedder>(&input, None)
+            .expect("lexical-only ok");
+        validate_analysis_output(&result.output).expect("valid");
+        assert_eq!(result.output.passes.len(), 1);
+        assert!(
+            result.output.merged_repetition_report.stats.cluster_count >= 1,
+            "lexical pass should find the repeated sentence"
+        );
     }
 
     #[test]

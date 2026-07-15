@@ -124,9 +124,7 @@ impl Storage {
                 Arc::new(StringArray::from(vec![params.settings_hash.as_str()])),
                 Arc::new(UInt32Array::from(vec![params.window_size])),
                 Arc::new(UInt32Array::from(vec![params.stride])),
-                Arc::new(UInt32Array::from(vec![
-                    params.tokens_per_page.unwrap_or(0),
-                ])),
+                Arc::new(UInt32Array::from(vec![params.tokens_per_page.unwrap_or(0)])),
                 Arc::new(StringArray::from(vec![params.pagination_mode.as_str()])),
                 Arc::new(UInt32Array::from(vec![params.min_repetitions])),
                 Arc::new(UInt32Array::from(vec![params.min_samples])),
@@ -213,29 +211,113 @@ impl Storage {
             if batch.num_rows() == 0 {
                 continue;
             }
-            let job_ids = batch.column_by_name("job_id").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let document_paths = batch.column_by_name("document_path").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let document_hashes = batch.column_by_name("document_hash").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let settings_hashes = batch.column_by_name("settings_hash").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let window_sizes = batch.column_by_name("window_size").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let strides = batch.column_by_name("stride").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let tokens_per_pages = batch.column_by_name("tokens_per_page").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let pagination_modes = batch.column_by_name("pagination_mode").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let min_repetitions_col = batch.column_by_name("min_repetitions").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let min_samples_col = batch.column_by_name("min_samples").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let chapter_break_res = batch.column_by_name("chapter_break_re").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let windows_totals = batch.column_by_name("windows_total").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let windows_committeds = batch.column_by_name("windows_committed").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-            let statuses = batch.column_by_name("status").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let created_ats = batch.column_by_name("created_at").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-            let updated_ats = batch.column_by_name("updated_at").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
+            let job_ids = batch
+                .column_by_name("job_id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let document_paths = batch
+                .column_by_name("document_path")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let document_hashes = batch
+                .column_by_name("document_hash")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let settings_hashes = batch
+                .column_by_name("settings_hash")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let window_sizes = batch
+                .column_by_name("window_size")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let strides = batch
+                .column_by_name("stride")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let tokens_per_pages = batch
+                .column_by_name("tokens_per_page")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let pagination_modes = batch
+                .column_by_name("pagination_mode")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let min_repetitions_col = batch
+                .column_by_name("min_repetitions")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let min_samples_col = batch
+                .column_by_name("min_samples")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let chapter_break_res = batch
+                .column_by_name("chapter_break_re")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let windows_totals = batch
+                .column_by_name("windows_total")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let windows_committeds = batch
+                .column_by_name("windows_committed")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .unwrap();
+            let statuses = batch
+                .column_by_name("status")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let created_ats = batch
+                .column_by_name("created_at")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let updated_ats = batch
+                .column_by_name("updated_at")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
 
             for i in 0..batch.num_rows() {
                 let tpp_val = tokens_per_pages.value(i);
                 let tokens_per_page = if tpp_val == 0 { None } else { Some(tpp_val) };
 
                 let chapter_re_val = chapter_break_res.value(i).to_string();
-                let chapter_break_re = if chapter_re_val.is_empty() { None } else { Some(chapter_re_val) };
+                let chapter_break_re = if chapter_re_val.is_empty() {
+                    None
+                } else {
+                    Some(chapter_re_val)
+                };
 
                 records.push(JobRecord {
                     job_id: job_ids.value(i).to_string(),
@@ -262,10 +344,7 @@ impl Storage {
 
     /// Get a single job record by job_id.
     /// Returns None if the job does not exist.
-    pub async fn get_job_by_id(
-        &self,
-        job_id: &str,
-    ) -> Result<Option<JobRecord>, StorageError> {
+    pub async fn get_job_by_id(&self, job_id: &str) -> Result<Option<JobRecord>, StorageError> {
         let table = self.open_table(TABLE_JOBS).await?;
         let filter = format!("job_id = '{}'", job_id);
         let stream = table.query().only_if(filter).execute().await?;
@@ -276,28 +355,112 @@ impl Storage {
         }
 
         let batch = &batches[0];
-        let job_ids = batch.column_by_name("job_id").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let document_paths = batch.column_by_name("document_path").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let document_hashes = batch.column_by_name("document_hash").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let settings_hashes = batch.column_by_name("settings_hash").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let window_sizes = batch.column_by_name("window_size").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let strides = batch.column_by_name("stride").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let tokens_per_pages = batch.column_by_name("tokens_per_page").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let pagination_modes = batch.column_by_name("pagination_mode").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let min_repetitions_col = batch.column_by_name("min_repetitions").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let min_samples_col = batch.column_by_name("min_samples").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let chapter_break_res = batch.column_by_name("chapter_break_re").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let windows_totals = batch.column_by_name("windows_total").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let windows_committeds = batch.column_by_name("windows_committed").unwrap().as_any().downcast_ref::<UInt32Array>().unwrap();
-        let statuses = batch.column_by_name("status").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let created_ats = batch.column_by_name("created_at").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
-        let updated_ats = batch.column_by_name("updated_at").unwrap().as_any().downcast_ref::<StringArray>().unwrap();
+        let job_ids = batch
+            .column_by_name("job_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let document_paths = batch
+            .column_by_name("document_path")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let document_hashes = batch
+            .column_by_name("document_hash")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let settings_hashes = batch
+            .column_by_name("settings_hash")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let window_sizes = batch
+            .column_by_name("window_size")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let strides = batch
+            .column_by_name("stride")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let tokens_per_pages = batch
+            .column_by_name("tokens_per_page")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let pagination_modes = batch
+            .column_by_name("pagination_mode")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let min_repetitions_col = batch
+            .column_by_name("min_repetitions")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let min_samples_col = batch
+            .column_by_name("min_samples")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let chapter_break_res = batch
+            .column_by_name("chapter_break_re")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let windows_totals = batch
+            .column_by_name("windows_total")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let windows_committeds = batch
+            .column_by_name("windows_committed")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .unwrap();
+        let statuses = batch
+            .column_by_name("status")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let created_ats = batch
+            .column_by_name("created_at")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let updated_ats = batch
+            .column_by_name("updated_at")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
 
         let tpp_val = tokens_per_pages.value(0);
         let tokens_per_page = if tpp_val == 0 { None } else { Some(tpp_val) };
 
         let chapter_re_val = chapter_break_res.value(0).to_string();
-        let chapter_break_re = if chapter_re_val.is_empty() { None } else { Some(chapter_re_val) };
+        let chapter_break_re = if chapter_re_val.is_empty() {
+            None
+        } else {
+            Some(chapter_re_val)
+        };
 
         Ok(Some(JobRecord {
             job_id: job_ids.value(0).to_string(),
@@ -322,10 +485,7 @@ impl Storage {
     // ─── Window Operations ───────────────────────────────────────────────
 
     /// Insert a batch of window records with embeddings into the windows table.
-    pub async fn batch_insert_windows(
-        &self,
-        windows: &[WindowRecord],
-    ) -> Result<(), StorageError> {
+    pub async fn batch_insert_windows(&self, windows: &[WindowRecord]) -> Result<(), StorageError> {
         if windows.is_empty() {
             return Ok(());
         }
@@ -354,13 +514,9 @@ impl Storage {
             .collect();
         let values = Float32Array::from(all_embeddings);
         let embedding_field = Arc::new(Field::new("item", DataType::Float32, true));
-        let embedding_array = FixedSizeListArray::try_new(
-            embedding_field,
-            EMBEDDING_DIM,
-            Arc::new(values),
-            None,
-        )
-        .map_err(arrow_err)?;
+        let embedding_array =
+            FixedSizeListArray::try_new(embedding_field, EMBEDDING_DIM, Arc::new(values), None)
+                .map_err(arrow_err)?;
 
         let batch = RecordBatch::try_new(
             schema,
@@ -528,10 +684,7 @@ impl Storage {
     }
 
     /// Get all pages for a given job_id.
-    pub async fn get_pages_for_job(
-        &self,
-        job_id: &str,
-    ) -> Result<Vec<RecordBatch>, StorageError> {
+    pub async fn get_pages_for_job(&self, job_id: &str) -> Result<Vec<RecordBatch>, StorageError> {
         let table = self.open_table(TABLE_PAGES).await?;
         let filter = format!("job_id = '{}'", job_id);
         let stream = table.query().only_if(filter).execute().await?;

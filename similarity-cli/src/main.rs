@@ -73,7 +73,7 @@ struct AnalyzeArgs {
     #[arg(long, default_value_t = 10)]
     stride: u32,
 
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 2)]
     min_repetitions: u32,
 
     #[arg(long, default_value_t = 3)]
@@ -146,8 +146,7 @@ fn run_analyze_command(args: AnalyzeArgs) -> Result<String, String> {
             .map_err(|e| format!("failed to read stdin: {e}"))?;
         if buf.trim().is_empty() {
             return Err(
-                "no input: provide JSON on stdin, --input-file, or --story-path + --chapter"
-                    .into(),
+                "no input: provide JSON on stdin, --input-file, or --story-path + --chapter".into(),
             );
         }
         let request = JsonAnalysisRequest::from_reader(buf.as_bytes())?;

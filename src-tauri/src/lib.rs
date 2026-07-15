@@ -1,3 +1,4 @@
+pub mod analysis_output_store;
 pub mod app_settings;
 pub mod commands;
 pub mod display_state;

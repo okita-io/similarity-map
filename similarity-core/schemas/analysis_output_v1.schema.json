@@ -235,9 +235,14 @@
       "properties": {
         "pass_id": { "type": "string" },
         "pass_label": { "type": "string" },
+        "method": {
+          "type": "string",
+          "enum": ["embedding", "lexical"],
+          "description": "Detection backend. Missing values default to embedding for backward compatibility."
+        },
         "scope": { "$ref": "#/$defs/AnalysisScope" },
-        "window_size": { "type": "integer", "minimum": 5 },
-        "stride": { "type": "integer", "minimum": 1 },
+        "window_size": { "type": "integer", "minimum": 0 },
+        "stride": { "type": "integer", "minimum": 0 },
         "tokens_per_page": { "type": "integer", "minimum": 200 },
         "repetition_report": { "$ref": "#/$defs/RepetitionReportV1" }
       }

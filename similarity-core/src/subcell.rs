@@ -22,7 +22,8 @@ fn char_offset_to_linear_index(char_offset: u32, page_char_count: u32) -> u32 {
     if page_char_count == 0 {
         return 0;
     }
-    let index = ((char_offset as f64 / page_char_count as f64) * SUB_CELL_COUNT as f64).floor() as u32;
+    let index =
+        ((char_offset as f64 / page_char_count as f64) * SUB_CELL_COUNT as f64).floor() as u32;
     index.min(SUB_CELL_COUNT - 1)
 }
 
@@ -101,8 +102,11 @@ pub fn build_page_sub_grids(
     // Sort each sub-cell's clusters by sim_to_centroid descending and cap at 8.
     for grid in grids.values_mut() {
         for cell in grid.cells.iter_mut() {
-            cell.clusters
-                .sort_by(|a, b| b.sim_to_centroid.partial_cmp(&a.sim_to_centroid).unwrap_or(std::cmp::Ordering::Equal));
+            cell.clusters.sort_by(|a, b| {
+                b.sim_to_centroid
+                    .partial_cmp(&a.sim_to_centroid)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             cell.clusters.truncate(MAX_CLUSTERS_PER_CELL);
         }
     }
@@ -242,7 +246,11 @@ mod tests {
         page_char_counts.insert(1, 1000);
 
         let grids = build_page_sub_grids(&windows, &page_char_counts);
-        let cell = grids[0].cells.iter().find(|c| !c.clusters.is_empty()).unwrap();
+        let cell = grids[0]
+            .cells
+            .iter()
+            .find(|c| !c.clusters.is_empty())
+            .unwrap();
 
         assert_eq!(cell.clusters.len(), 3);
         assert_eq!(cell.clusters[0].sim_to_centroid, 0.9);
@@ -271,7 +279,11 @@ mod tests {
         page_char_counts.insert(1, 1000);
 
         let grids = build_page_sub_grids(&windows, &page_char_counts);
-        let cell = grids[0].cells.iter().find(|c| !c.clusters.is_empty()).unwrap();
+        let cell = grids[0]
+            .cells
+            .iter()
+            .find(|c| !c.clusters.is_empty())
+            .unwrap();
 
         // Should be capped at 8.
         assert_eq!(cell.clusters.len(), 8);
@@ -338,7 +350,10 @@ mod tests {
         let (start, end) = compute_sub_cell_span(0, 500, page_char_count);
         let cells_covered = end - start + 1;
         // ~50% of the page should cover ~200 of 400 sub-cells.
-        assert!(cells_covered >= 180 && cells_covered <= 220, "expected ~half page, got {cells_covered}");
+        assert!(
+            cells_covered >= 180 && cells_covered <= 220,
+            "expected ~half page, got {cells_covered}"
+        );
     }
 
     #[test]

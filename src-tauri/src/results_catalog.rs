@@ -75,10 +75,7 @@ pub fn load_catalog(app_data_dir: &Path, document_path: &str) -> DocumentResults
     }
 }
 
-pub fn save_catalog(
-    app_data_dir: &Path,
-    catalog: &DocumentResultsCatalog,
-) -> Result<(), AppError> {
+pub fn save_catalog(app_data_dir: &Path, catalog: &DocumentResultsCatalog) -> Result<(), AppError> {
     let dir = results_dir(app_data_dir);
     std::fs::create_dir_all(&dir).map_err(|e| {
         AppError::Session(SessionError {
@@ -112,14 +109,20 @@ pub fn sync_catalog_with_jobs(
     page_counts: &std::collections::HashMap<String, u32>,
     valid_job_ids: &HashSet<String>,
 ) {
-    catalog.results.retain(|entry| valid_job_ids.contains(&entry.job_id));
+    catalog
+        .results
+        .retain(|entry| valid_job_ids.contains(&entry.job_id));
 
     for job in jobs {
         if job.status != "complete" || !valid_job_ids.contains(&job.job_id) {
             continue;
         }
 
-        if catalog.results.iter().any(|entry| entry.job_id == job.job_id) {
+        if catalog
+            .results
+            .iter()
+            .any(|entry| entry.job_id == job.job_id)
+        {
             continue;
         }
 
@@ -143,23 +146,24 @@ pub fn sync_catalog_with_jobs(
     });
 
     if let Some(active_id) = &catalog.active_result_id {
-        if !catalog.results.iter().any(|entry| entry.result_id == *active_id) {
+        if !catalog
+            .results
+            .iter()
+            .any(|entry| entry.result_id == *active_id)
+        {
             catalog.active_result_id = None;
         }
     }
 }
 
 pub fn to_list(catalog: &DocumentResultsCatalog) -> DocumentResultsList {
-    let active_job_id = catalog
-        .active_result_id
-        .as_ref()
-        .and_then(|active_id| {
-            catalog
-                .results
-                .iter()
-                .find(|entry| entry.result_id == *active_id)
-                .map(|entry| entry.job_id.clone())
-        });
+    let active_job_id = catalog.active_result_id.as_ref().and_then(|active_id| {
+        catalog
+            .results
+            .iter()
+            .find(|entry| entry.result_id == *active_id)
+            .map(|entry| entry.job_id.clone())
+    });
 
     DocumentResultsList {
         document_path: catalog.document_path.clone(),
@@ -176,10 +180,12 @@ pub fn rename_result(
 ) -> Result<(), AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation(similarity_core::types::ValidationError {
-            message: "Result name cannot be empty".to_string(),
-            field: "name".to_string(),
-        }));
+        return Err(AppError::Validation(
+            similarity_core::types::ValidationError {
+                message: "Result name cannot be empty".to_string(),
+                field: "name".to_string(),
+            },
+        ));
     }
 
     if catalog
@@ -187,19 +193,23 @@ pub fn rename_result(
         .iter()
         .any(|entry| entry.name == trimmed && entry.result_id != result_id)
     {
-        return Err(AppError::Validation(similarity_core::types::ValidationError {
-            message: format!("A result named \"{trimmed}\" already exists"),
-            field: "name".to_string(),
-        }));
+        return Err(AppError::Validation(
+            similarity_core::types::ValidationError {
+                message: format!("A result named \"{trimmed}\" already exists"),
+                field: "name".to_string(),
+            },
+        ));
     }
 
     let entry = catalog
         .results
         .iter_mut()
         .find(|entry| entry.result_id == result_id)
-        .ok_or_else(|| AppError::Session(SessionError {
-            message: format!("Result not found: {result_id}"),
-        }))?;
+        .ok_or_else(|| {
+            AppError::Session(SessionError {
+                message: format!("Result not found: {result_id}"),
+            })
+        })?;
 
     entry.name = trimmed.to_string();
     entry.updated_at = Utc::now().to_rfc3339();
@@ -214,17 +224,21 @@ pub fn add_result_alias(
 ) -> Result<SavedResultEntry, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation(similarity_core::types::ValidationError {
-            message: "Result name cannot be empty".to_string(),
-            field: "name".to_string(),
-        }));
+        return Err(AppError::Validation(
+            similarity_core::types::ValidationError {
+                message: "Result name cannot be empty".to_string(),
+                field: "name".to_string(),
+            },
+        ));
     }
 
     if catalog.results.iter().any(|entry| entry.name == trimmed) {
-        return Err(AppError::Validation(similarity_core::types::ValidationError {
-            message: format!("A result named \"{trimmed}\" already exists"),
-            field: "name".to_string(),
-        }));
+        return Err(AppError::Validation(
+            similarity_core::types::ValidationError {
+                message: format!("A result named \"{trimmed}\" already exists"),
+                field: "name".to_string(),
+            },
+        ));
     }
 
     let now = Utc::now().to_rfc3339();
@@ -257,9 +271,11 @@ pub fn remove_result(
         .results
         .iter()
         .position(|entry| entry.result_id == result_id)
-        .ok_or_else(|| AppError::Session(SessionError {
-            message: format!("Result not found: {result_id}"),
-        }))?;
+        .ok_or_else(|| {
+            AppError::Session(SessionError {
+                message: format!("Result not found: {result_id}"),
+            })
+        })?;
 
     let removed = catalog.results.remove(index);
     if catalog.active_result_id.as_deref() == Some(result_id) {
@@ -278,7 +294,10 @@ pub fn remove_result(
     })
 }
 
-pub fn set_active_result(catalog: &mut DocumentResultsCatalog, result_id: &str) -> Result<(), AppError> {
+pub fn set_active_result(
+    catalog: &mut DocumentResultsCatalog,
+    result_id: &str,
+) -> Result<(), AppError> {
     if !catalog
         .results
         .iter()

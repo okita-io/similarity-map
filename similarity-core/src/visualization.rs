@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::AnalysisParams;
 use crate::centroid::WindowData;
-use crate::job_data::{load_job_render_data, parse_window_data_from_batches};
+use crate::contract::AnalysisOutput;
 use crate::importer::{import_document, ImportDocumentParams};
+use crate::job_data::{load_job_render_data, parse_window_data_from_batches};
+use crate::rasterizer::{encode_canvas_base64, rasterize_page};
+use crate::report::ScopeManifest;
 use crate::report::{
     build_repetition_report_with_manifest, pages_to_document_text, RepetitionReport, SpanLocation,
 };
-use crate::rasterizer::{encode_canvas_base64, rasterize_page};
-use crate::report::ScopeManifest;
-use crate::contract::AnalysisOutput;
 use crate::storage::Storage;
 use crate::types::{AppError, ClusterRegistry, Page, PageSubGrid, SessionError};
 
@@ -200,11 +200,8 @@ pub fn build_visualization_payload(
         })
         .collect();
 
-    let mut analysis = AnalysisSummary::from_params(
-        params,
-        pages.len() as u32,
-        window_data.len() as u32,
-    );
+    let mut analysis =
+        AnalysisSummary::from_params(params, pages.len() as u32, window_data.len() as u32);
     analysis.tolerance = tolerance;
     analysis.gamma = gamma;
 
@@ -236,6 +233,27 @@ pub async fn load_visualization_payload(
     tolerance: f32,
     gamma: f32,
     expand_to_sentences: bool,
+) -> Result<VisualizationPayload, AppError> {
+    load_visualization_payload_with_analysis_output(
+        store,
+        job_id,
+        tolerance,
+        gamma,
+        expand_to_sentences,
+        None,
+    )
+    .await
+}
+
+/// Like [`load_visualization_payload`], but attaches a preloaded `AnalysisOutput`
+/// (e.g. lexical sidecar from the desktop sessions directory).
+pub async fn load_visualization_payload_with_analysis_output(
+    store: &Storage,
+    job_id: &str,
+    tolerance: f32,
+    gamma: f32,
+    expand_to_sentences: bool,
+    analysis_output: Option<AnalysisOutput>,
 ) -> Result<VisualizationPayload, AppError> {
     let job = store
         .get_job_by_id(job_id)
@@ -278,7 +296,7 @@ pub async fn load_visualization_payload(
         link_subphrases: false,
     };
 
-    Ok(build_visualization_payload(
+    let mut payload = build_visualization_payload(
         job_id,
         &pages,
         &window_data,
@@ -288,9 +306,65 @@ pub async fn load_visualization_payload(
         tolerance,
         gamma,
         expand_to_sentences,
-        None,
-        None,
-    ))
+        analysis_output.as_ref().map(|o| o.scope_manifest.clone()),
+        analysis_output,
+    );
+
+    // Prefer lexical/merged contract report for highlights when sidecar is present.
+    if let Some(ref output) = payload.analysis_output {
+        let lexical_highlights =
+            highlights_from_analysis_output(&payload.pages, output, &payload.cluster_registry);
+        if !lexical_highlights.is_empty() {
+            payload.highlights.extend(lexical_highlights);
+            payload
+                .highlights
+                .sort_by_key(|h| (h.doc_char_start, h.cluster_id, h.instance_id));
+        }
+    }
+
+    Ok(payload)
+}
+
+fn highlights_from_analysis_output(
+    pages: &[Page],
+    output: &AnalysisOutput,
+    cluster_registry: &ClusterRegistry,
+) -> Vec<TextHighlight> {
+    let mut highlights = Vec::new();
+    // Use a synthetic hue offset so lexical clusters remain visible even when
+    // embedding registry IDs don't overlap.
+    let hue_for = |cluster_id: i32| -> f32 {
+        if let Some(info) = cluster_registry.clusters.get(&cluster_id) {
+            info.hue
+        } else {
+            let bucket = (cluster_id.rem_euclid(12)) as f32;
+            bucket * 30.0
+        }
+    };
+
+    for cluster in &output.merged_repetition_report.clusters {
+        let hue = hue_for(cluster.cluster_id);
+        for (idx, span) in cluster.spans.iter().enumerate() {
+            let role = if idx == 0 {
+                HighlightRole::Canonical
+            } else {
+                HighlightRole::Duplicate
+            };
+            highlights.push(TextHighlight {
+                cluster_id: cluster.cluster_id,
+                instance_id: span.instance_id,
+                role,
+                doc_char_start: span.location.doc_char_start,
+                doc_char_end: span.location.doc_char_end,
+                page: doc_char_to_page(pages, span.location.doc_char_start),
+                hue,
+                similarity_to_centroid: span.similarity_to_centroid,
+                text: span.text.clone(),
+                location: Some(span.location.clone()),
+            });
+        }
+    }
+    highlights
 }
 
 #[cfg(test)]
@@ -402,16 +476,15 @@ mod tests {
             },
         ];
         let registry = crate::centroid::build_cluster_registry(&windows);
-        let report = build_repetition_report_with_manifest("job", text, &windows, false, Some(&manifest));
+        let report =
+            build_repetition_report_with_manifest("job", text, &windows, false, Some(&manifest));
         let highlights = build_text_highlights(&pages, &report, &registry);
         assert!(highlights.iter().all(|h| h.location.is_some()));
-        assert!(
-            highlights[0]
-                .location
-                .as_ref()
-                .unwrap()
-                .segment_id
-                .starts_with("ch01_")
-        );
+        assert!(highlights[0]
+            .location
+            .as_ref()
+            .unwrap()
+            .segment_id
+            .starts_with("ch01_"));
     }
 }

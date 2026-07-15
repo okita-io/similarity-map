@@ -315,7 +315,11 @@ mod tests {
     fn test_generate_probe_texts_unique() {
         let texts = generate_probe_texts();
         let unique: std::collections::HashSet<&String> = texts.iter().collect();
-        assert_eq!(unique.len(), texts.len(), "Probe texts should all be unique");
+        assert_eq!(
+            unique.len(),
+            texts.len(),
+            "Probe texts should all be unique"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Similarity Map Architecture
 
-Last verified: 2026-07-14 against `b097f7d`.
+Last verified: 2026-07-14 (lexical primary pass landed).
 
 ## Design direction
 
@@ -27,7 +27,9 @@ The intended dependency direction is one way: adapters depend on
 Portable repetition-analysis library. Important modules:
 
 - `analyze_prose.rs` — in-memory single-pass orchestration and `TextEmbedder`
-- `multi_pass.rs` — act/chapter pass bundles and deterministic report merge
+- `lexical.rs` — deterministic lexical shingle detector (RF primary pass)
+- `multi_pass.rs` — act/chapter pass bundles (`PassMethod::{Lexical,Embedding}`),
+  lexical-first RF defaults (`min_repetitions: 2`), and deterministic report merge
 - `contract.rs` — `AnalysisOutput` v1 and validation
 - `report.rs` / `spans.rs` — editorial spans, structural locations, and suggested
   operations
@@ -42,7 +44,8 @@ Portable repetition-analysis library. Important modules:
 
 The public integration boundary is `AnalysisOutput` v1. It contains scope metadata,
 all pass reports, and one merged repetition report. Its JSON Schema and example fixture
-live under `similarity-core/schemas/` and `similarity-core/fixtures/`.
+live under `similarity-core/schemas/` and `similarity-core/fixtures/`. Lexical passes
+do not bump the schema; they use stable `pass_id` / `pass_label` provenance.
 
 ### `similarity-cli`
 
@@ -105,8 +108,9 @@ allows ONNX production inference or deterministic offline tests.
 
 `analyze_prose_multi_pass` executes configured act-scoped and chapter-scoped passes,
 then merges clusters when instance spans overlap by at least 50% of the shorter span.
-The default Romance Factory bundle contains two fine act passes and two coarser chapter
-passes.
+The default Romance Factory bundle prepends a chapter-scoped lexical primary pass, then
+runs two fine act embedding passes and two coarser chapter embedding passes. Lexical-only
+bundles may omit the embedder entirely.
 
 ### Persistent desktop file analysis
 
@@ -121,8 +125,9 @@ flowchart LR
 ```
 
 This route exists because it checkpoints embeddings and emits progress/cancellation
-events. It delegates some post-embedding logic to the core but remains a separate
-orchestrator from `analyze_prose`.
+events. It now also runs a lexical primary pass after import and writes
+`sessions/<job_id>.analysis_output.json` for RF export / text highlights. Embedding
+windows remain the LanceDB grid source of truth.
 
 ### Desktop text and RF chapter analysis
 

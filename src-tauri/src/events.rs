@@ -22,7 +22,12 @@ pub const LOG: &str = "similarity-map:log";
 ///
 /// Safe to call from any thread; failures are intentionally swallowed so logging
 /// never breaks the calling code path.
-pub fn emit_log(app_handle: &tauri::AppHandle, level: &str, source: &str, message: impl Into<String>) {
+pub fn emit_log(
+    app_handle: &tauri::AppHandle,
+    level: &str,
+    source: &str,
+    message: impl Into<String>,
+) {
     use tauri::Emitter;
     let payload = serde_json::json!({
         "level": level,

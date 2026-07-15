@@ -36,28 +36,38 @@ cluster. Direct grid-cell drill-down and custom hover tooltips are not complete;
 
 ## How it works
 
+Romance Factory chapter analysis now runs a **lexical shingle primary pass** first
+(deterministic, no ONNX), then optional embedding recall passes for fuzzy paraphrase
+candidates.
+
 ```mermaid
 flowchart LR
-  A[Document] --> B[Paginate]
-  B --> C[Sliding phrase windows]
+  A[Chapter prose] --> L[Lexical primary]
+  A --> C[Sliding phrase windows]
   C --> D[Embed with MiniLM]
   D --> E[Cluster similar windows]
-  E --> F[Map to page sub-grid]
-  F --> G[Render color grid]
+  L --> M[Merge passes]
+  E --> M
+  M --> G[AnalysisOutput v1 / grid]
 ```
 
-1. **Import** — PDFs keep natural page breaks; plain text is split into configurable token-sized pages (~400 tokens ≈ one printed page).
-2. **Window** — Overlapping text windows slide across each page (size and stride are adjustable).
-3. **Embed** — Each window becomes a vector via a local ONNX model
+1. **Lexical primary** — sentence, paragraph, and short phrase candidates are matched with
+   token shingles (Jaccard + order/frequency blend), then collapsed into maximal
+   multi-paragraph blocks. Default occurrence count is **2**.
+2. **Import / window** — embedding passes still paginate and slide overlapping windows.
+3. **Embed** — each window becomes a vector via a local ONNX model
    (`all-MiniLM-L6-v2`, offline after the first download).
 4. **Cluster** — HDBSCAN finds organic repetition groups; KMeans assigns stable labels so colors stay consistent between runs.
-5. **Visualize** — Windows map to a 20×20 sub-grid per page; clusters render as HSV-colored pixels with similarity-weighted blending when multiple motifs overlap.
+5. **Merge / visualize** — pass reports merge at 50% span overlap into `AnalysisOutput` v1;
+   desktop grids still render embedding windows on a 20×20 sub-grid.
 
 > **Embedding-quality warning:** the current ONNX path still feeds hash-derived token
 > IDs to MiniLM instead of the model's WordPiece tokenizer. Exact and strongly lexical
-> repetition can be useful, but paraphrase-level semantic claims are not yet validated.
-> Treat production scores as heuristic until tokenizer integration and reference-vector
-> tests land.
+> repetition should prefer the lexical primary pass. Paraphrase-level semantic claims from
+> embeddings are not yet validated.
+
+See [`LEXICAL-SHINGLE-ROADMAP.md`](./LEXICAL-SHINGLE-ROADMAP.md) for thresholds, fixtures,
+and the deferred LanceDB/grid follow-up.
 
 ### Detection scales
 
@@ -291,12 +301,12 @@ cargo run -p similarity-cli -- analyze \
 |---|---|
 | `--story-path` + `--chapter` | Load RF chapter prose and build `scope_manifest` automatically |
 | `--input-file` | Read `{ text, scope_manifest, params }` JSON from a file |
-| `--pass-config` | YAML pass bundle (`min_repetitions`, `passes[]` with `window_size` / `stride`) |
+| `--pass-config` | YAML pass bundle (`min_repetitions`, `passes[]` with optional `method: lexical` / `embedding`, plus `window_size` / `stride` for embedding) |
 | `--expand-sentences` / `--no-expand-sentences` | Clip spans to sentence boundaries (default: expand) |
 | `--model-path` | ONNX model path (or set `SIMILARITY_MAP_MODEL_PATH`) |
 | `--window-size`, `--stride`, … | Single-pass overrides when `--pass-config` is omitted |
 
-**Production runs** require the `all-MiniLM-L6-v2` ONNX model (same as the desktop app). Point `--model-path` at the cached file or set `SIMILARITY_MAP_DATA_DIR` / `SIMILARITY_MAP_MODEL_PATH`.
+**Production embedding runs** require the `all-MiniLM-L6-v2` ONNX model (same as the desktop app). Lexical-only bundles (see `similarity-cli/fixtures/pass_config_lexical_smoke.yaml`) run without ONNX. Point `--model-path` at the cached file or set `SIMILARITY_MAP_DATA_DIR` / `SIMILARITY_MAP_MODEL_PATH` when embedding passes are present.
 
 ### PyO3 Python bindings (`similarity-core-py`)
 

@@ -169,7 +169,11 @@ mod tests {
         for window in &windows {
             // Round-trip: extracting from page text must equal window text
             let extracted = &page.text[window.char_start as usize..window.char_end as usize];
-            assert_eq!(extracted, window.text, "Round-trip failed for window_index {}", window.window_index);
+            assert_eq!(
+                extracted, window.text,
+                "Round-trip failed for window_index {}",
+                window.window_index
+            );
         }
     }
 

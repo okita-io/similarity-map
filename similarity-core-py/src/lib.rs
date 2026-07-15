@@ -13,9 +13,11 @@ use similarity_core::model;
 use similarity_core::report::AnalysisScope;
 use similarity_core::report::ScopeManifest;
 use similarity_core::{
-    analyze_prose as core_analyze_prose,
-    analyze_prose_multi_pass as core_analyze_prose_multi_pass, AnalysisInput,
-    AnalyzeProseOptions, DeterministicTestEmbedder, MultiPassConfig, MultiPassInput,
+    analyze_prose as core_analyze_prose, analyze_prose_multi_pass as core_analyze_prose_multi_pass,
+    build_scope_manifest as core_build_scope_manifest,
+    chapter_scope_from_manifest as core_chapter_scope_from_manifest, default_rf_multi_pass_config,
+    load_rf_chapter as core_load_rf_chapter, AnalysisInput, AnalyzeProseOptions,
+    DeterministicTestEmbedder, MultiPassConfig, MultiPassInput,
 };
 
 /// JSON params for single-pass analysis (mirrors similarity-cli stdin envelope).
@@ -38,7 +40,7 @@ struct JsonAnalysisParams {
 }
 
 fn default_min_repetitions() -> u32 {
-    3
+    2
 }
 
 fn default_min_samples() -> u32 {
@@ -76,7 +78,10 @@ fn py_dict_to_type<T: for<'de> Deserialize<'de>>(obj: &Bound<'_, PyAny>) -> PyRe
     serde_json::from_str(&json).map_err(|e| PyRuntimeError::new_err(format!("invalid input: {e}")))
 }
 
-fn analysis_output_to_py_dict(py: Python<'_>, output: &similarity_core::AnalysisOutput) -> PyResult<PyObject> {
+fn analysis_output_to_py_dict(
+    py: Python<'_>,
+    output: &similarity_core::AnalysisOutput,
+) -> PyResult<PyObject> {
     validate_analysis_output(output).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     let json = to_export_json(output).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     let json_mod = py.import_bound("json")?;
@@ -144,9 +149,7 @@ fn dirs_data_home() -> Option<PathBuf> {
     {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share"))
-            })
+            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))
     }
     #[cfg(windows)]
     {
@@ -159,17 +162,7 @@ fn dirs_data_home() -> Option<PathBuf> {
 }
 
 fn chapter_scope_from_manifest(text: &str, manifest: &ScopeManifest) -> AnalysisScope {
-    let text_len = text.len() as u32;
-    AnalysisScope {
-        chapter: manifest.chapter,
-        act: None,
-        document_path: None,
-        document_hash: None,
-        scope_char_start: 0,
-        scope_char_end: text_len,
-        doc_char_start: 0,
-        doc_char_end: text_len,
-    }
+    core_chapter_scope_from_manifest(text, manifest)
 }
 
 fn build_single_pass_options(
@@ -190,6 +183,62 @@ fn build_single_pass_options(
         gamma: similarity_core::DEFAULT_GAMMA,
         expand_to_sentences,
     }
+}
+
+/// Build a chapter `ScopeManifest` from prose (act blocks separated by blank lines).
+#[pyfunction]
+#[pyo3(signature = (text, chapter=1, doc_char_offset=0))]
+fn build_scope_manifest(
+    py: Python<'_>,
+    text: String,
+    chapter: u32,
+    doc_char_offset: u32,
+) -> PyResult<PyObject> {
+    let manifest = core_build_scope_manifest(chapter, &text, doc_char_offset);
+    value_to_py_dict(py, &manifest)
+}
+
+/// Default Romance Factory multi-pass config (lexical primary + embedding recall).
+#[pyfunction]
+fn default_rf_pass_config(py: Python<'_>) -> PyResult<PyObject> {
+    value_to_py_dict(py, &default_rf_multi_pass_config())
+}
+
+/// Load one RF chapter draft (text + scope_manifest + document_hash).
+#[pyfunction]
+fn load_rf_chapter(py: Python<'_>, story_path: String, chapter: u32) -> PyResult<PyObject> {
+    let draft = core_load_rf_chapter(Path::new(&story_path), chapter).map_err(app_error_to_py)?;
+    value_to_py_dict(py, &draft)
+}
+
+/// Validate an AnalysisOutput dict against the v1 contract.
+#[pyfunction]
+fn validate_analysis_output_py(output: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let parsed: similarity_core::AnalysisOutput = py_dict_to_type(output)?;
+    validate_analysis_output(&parsed).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(true)
+}
+
+/// Pretty-print AnalysisOutput JSON (validated).
+#[pyfunction]
+fn to_export_json_py(output: &Bound<'_, PyAny>) -> PyResult<String> {
+    let parsed: similarity_core::AnalysisOutput = py_dict_to_type(output)?;
+    validate_analysis_output(&parsed).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    to_export_json(&parsed).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// Whether a multi-pass config dict requires an ONNX embedder.
+#[pyfunction]
+fn pass_config_needs_embedder(pass_config: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let config: MultiPassConfig = py_dict_to_type(pass_config)?;
+    Ok(config.needs_embedder())
+}
+
+fn value_to_py_dict<T: serde::Serialize>(py: Python<'_>, value: &T) -> PyResult<PyObject> {
+    let json = serde_json::to_string(value).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let json_mod = py.import_bound("json")?;
+    let obj = json_mod.call_method1("loads", (json,))?;
+    Ok(obj.into())
 }
 
 /// Run single-pass headless analysis; returns AnalysisOutput v1 as a dict.
@@ -255,15 +304,19 @@ fn analyze_prose_multi_pass(
         job_id,
     };
 
-    let output = if test_embedder {
+    let output = if !input.config.needs_embedder() {
+        core_analyze_prose_multi_pass::<DeterministicTestEmbedder>(&input, None)
+            .map_err(app_error_to_py)?
+            .output
+    } else if test_embedder {
         let mut embedder = DeterministicTestEmbedder::new(384);
-        core_analyze_prose_multi_pass(&input, &mut embedder)
+        core_analyze_prose_multi_pass(&input, Some(&mut embedder))
             .map_err(app_error_to_py)?
             .output
     } else {
         let model_path = resolve_model_path().map_err(PyRuntimeError::new_err)?;
         let mut engine = EmbeddingEngine::new(&model_path).map_err(app_error_to_py)?;
-        core_analyze_prose_multi_pass(&input, &mut engine)
+        core_analyze_prose_multi_pass(&input, Some(&mut engine))
             .map_err(app_error_to_py)?
             .output
     };
@@ -275,6 +328,18 @@ fn analyze_prose_multi_pass(
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_prose, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_prose_multi_pass, m)?)?;
+    m.add_function(wrap_pyfunction!(build_scope_manifest, m)?)?;
+    m.add_function(wrap_pyfunction!(default_rf_pass_config, m)?)?;
+    m.add_function(wrap_pyfunction!(load_rf_chapter, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_analysis_output_py, m)?)?;
+    m.add_function(wrap_pyfunction!(to_export_json_py, m)?)?;
+    m.add_function(wrap_pyfunction!(pass_config_needs_embedder, m)?)?;
+    // Stable Python names (validate_analysis_output / to_export_json).
+    m.setattr(
+        "validate_analysis_output",
+        m.getattr("validate_analysis_output_py")?,
+    )?;
+    m.setattr("to_export_json", m.getattr("to_export_json_py")?)?;
     Ok(())
 }
 

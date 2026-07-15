@@ -161,10 +161,12 @@ fn http_client() -> Result<reqwest::Client, AppError> {
         .redirect(reqwest::redirect::Policy::default())
         .timeout(std::time::Duration::from_secs(600))
         .build()
-        .map_err(|e| AppError::Model(ModelError {
-            message: format!("Failed to create HTTP client: {}", e),
-            recoverable: true,
-        }))
+        .map_err(|e| {
+            AppError::Model(ModelError {
+                message: format!("Failed to create HTTP client: {}", e),
+                recoverable: true,
+            })
+        })
 }
 
 pub async fn download_model(
@@ -183,7 +185,10 @@ pub async fn download_model(
 
     if !response.status().is_success() {
         return Err(AppError::Model(ModelError {
-            message: format!("Model download failed with HTTP status: {}", response.status()),
+            message: format!(
+                "Model download failed with HTTP status: {}",
+                response.status()
+            ),
             recoverable: true,
         }));
     }

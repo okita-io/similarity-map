@@ -101,7 +101,10 @@ pub fn build_cluster_registry(windows: &[WindowData]) -> ClusterRegistry {
 
         for member in members {
             let sim = cosine_similarity(&member.embedding, &centroid);
-            if sim > best_sim || (sim == best_sim && best_window.map_or(true, |bw| member.window_index < bw.window_index)) {
+            if sim > best_sim
+                || (sim == best_sim
+                    && best_window.map_or(true, |bw| member.window_index < bw.window_index))
+            {
                 best_sim = sim;
                 best_window = Some(member);
             }

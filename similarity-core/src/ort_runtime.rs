@@ -57,7 +57,9 @@ pub fn dylib_search_paths() -> Vec<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         paths.push(PathBuf::from("/usr/lib/x86_64-linux-gnu/libonnxruntime.so"));
-        paths.push(PathBuf::from("/usr/lib/aarch64-linux-gnu/libonnxruntime.so"));
+        paths.push(PathBuf::from(
+            "/usr/lib/aarch64-linux-gnu/libonnxruntime.so",
+        ));
         paths.push(PathBuf::from("/usr/local/lib/libonnxruntime.so"));
         paths.push(PathBuf::from("/usr/lib/libonnxruntime.so"));
     }
@@ -72,9 +74,7 @@ pub fn dylib_search_paths() -> Vec<PathBuf> {
 
 /// Returns the first existing ONNX Runtime dylib from [`dylib_search_paths`].
 pub fn resolve_dylib_path() -> Option<PathBuf> {
-    dylib_search_paths()
-        .into_iter()
-        .find(|path| path.is_file())
+    dylib_search_paths().into_iter().find(|path| path.is_file())
 }
 
 /// Load and initialize ONNX Runtime once per process.
@@ -82,9 +82,7 @@ pub fn resolve_dylib_path() -> Option<PathBuf> {
 /// # Errors
 /// Returns `AppError::Model` if the dylib cannot be found or fails to load.
 pub fn ensure_loaded() -> Result<(), AppError> {
-    ORT_INIT
-        .get_or_init(try_load)
-        .clone()
+    ORT_INIT.get_or_init(try_load).clone()
 }
 
 fn try_load() -> Result<(), AppError> {
@@ -98,10 +96,7 @@ fn try_load() -> Result<(), AppError> {
         .map_err(|e| load_failed_error(&path, &e.to_string()))?
         .commit();
 
-    log::info!(
-        "ONNX Runtime loaded from {}",
-        path.display()
-    );
+    log::info!("ONNX Runtime loaded from {}", path.display());
 
     Ok(())
 }
@@ -110,9 +105,7 @@ fn missing_runtime_error() -> AppError {
     let name = dylib_filename();
     let hint = install_hint();
     AppError::Model(ModelError {
-        message: format!(
-            "ONNX Runtime shared library ({name}) not found. {hint}"
-        ),
+        message: format!("ONNX Runtime shared library ({name}) not found. {hint}"),
         recoverable: false,
     })
 }
@@ -160,7 +153,10 @@ mod tests {
     fn ort_dylib_path_env_is_first_candidate() {
         std::env::set_var("ORT_DYLIB_PATH", "/custom/libonnxruntime.dylib");
         let paths = dylib_search_paths();
-        assert_eq!(paths.first().map(|p| p.as_os_str()), Some(std::ffi::OsStr::new("/custom/libonnxruntime.dylib")));
+        assert_eq!(
+            paths.first().map(|p| p.as_os_str()),
+            Some(std::ffi::OsStr::new("/custom/libonnxruntime.dylib"))
+        );
         std::env::remove_var("ORT_DYLIB_PATH");
     }
 }
